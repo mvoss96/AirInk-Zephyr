@@ -1,0 +1,155 @@
+/*
+ * Board overlay for AirInk.
+ *
+ *   LED    -> P0.15  (led0 alias, provided by the promicro_nrf52840 board)
+ *   Button -> P0.11  (active-low, internal pull-up)
+ *   SCD41  -> I2C0, SCL=P0.22, SDA=P0.24, addr 0x62 (single-shot mode)
+ *   3V3    -> external LDO / load-switch enabled by P0.13 (kept on at boot)
+ *   E-Paper-> GDEY042T81 4.2" (SSD1683, solomon,ssd1683 quirk; landscape 400x300, rotation 270)
+ *            SPI2: SCK=P1.11, MOSI=P1.13, CS=P0.10
+ *            DC=P0.09, RST=P0.29, BUSY=P0.02 (active-high)
+ *
+ * Note: the board's default i2c0 puts SCL on P0.11, which would collide with
+ * the button. We remap i2c0 to P0.22/P0.24 below, which frees P0.11.
+ * Note: DC/CS use P0.09/P0.10, which are the board's UART0 TX/RX, so uart0 is
+ * disabled below (our console is USB CDC ACM, not uart0).
+ */
+
+#include <zephyr/dt-bindings/gpio/gpio.h>
+#include <zephyr/dt-bindings/input/input-event-codes.h>
+#include <zephyr/dt-bindings/pinctrl/nrf-pinctrl.h>
+
+/ {
+	buttons {
+		compatible = "gpio-keys";
+
+		button0: button_0 {
+			/* P0.11, pressed = LOW, enable internal pull-up */
+			gpios = <&gpio0 11 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+			label = "User button";
+			zephyr,code = <INPUT_KEY_0>;
+		};
+	};
+
+	aliases {
+		sw0 = &button0;
+	};
+
+	/*
+	 * External 3V3 LDO / load-switch, gated by P0.13 (active-high).
+	 * regulator-boot-on makes Zephyr enable it automatically at boot,
+	 * before the SCD40 driver initialises, so the sensor rail is powered.
+	 */
+	ext_3v3: ext-3v3 {
+		compatible = "regulator-fixed";
+		regulator-name = "ext-3v3";
+		enable-gpios = <&gpio0 13 GPIO_ACTIVE_HIGH>;
+		regulator-boot-on;
+		regulator-always-on;
+		startup-delay-us = <10000>;
+	};
+};
+
+/* Remap i2c0 pins to the SCD40 wiring: SCL=P0.22, SDA=P0.24 */
+&pinctrl {
+	i2c0_default: i2c0_default {
+		group1 {
+			psels = <NRF_PSEL(TWIM_SCL, 0, 22)>,
+				<NRF_PSEL(TWIM_SDA, 0, 24)>;
+		};
+	};
+
+	i2c0_sleep: i2c0_sleep {
+		group1 {
+			psels = <NRF_PSEL(TWIM_SCL, 0, 22)>,
+				<NRF_PSEL(TWIM_SDA, 0, 24)>;
+			low-power-enable;
+		};
+	};
+};
+
+&i2c0 {
+	status = "okay";
+
+	scd41: scd41@62 {
+		compatible = "sensirion,scd41";
+		reg = <0x62>;
+		/* 0 = normal (5 s), 1 = low-power (30 s), 2 = single-shot.
+		 * Single-shot is SCD41-only and required by this binding. */
+		mode = <2>;
+	};
+};
+
+/* Free P0.09 (DC) and P0.10 (CS); they are UART0 TX/RX on this board. */
+&uart0 {
+	status = "disabled";
+};
+
+/* Remap SPI2 to the e-paper wiring: SCK=P1.11, MOSI=P1.13 (write-only, no MISO) */
+&spi2_default {
+	group1 {
+		psels = <NRF_PSEL(SPIM_SCK, 1, 11)>,
+			<NRF_PSEL(SPIM_MOSI, 1, 13)>;
+	};
+};
+
+&spi2_sleep {
+	group1 {
+		psels = <NRF_PSEL(SPIM_SCK, 1, 11)>,
+			<NRF_PSEL(SPIM_MOSI, 1, 13)>;
+		low-power-enable;
+	};
+};
+
+&spi2 {
+	status = "okay";
+	cs-gpios = <&gpio0 10 GPIO_ACTIVE_LOW>;
+};
+
+/ {
+	chosen {
+		zephyr,display = &epaper;
+	};
+
+	mipi_dbi_epaper {
+		compatible = "zephyr,mipi-dbi-spi";
+		spi-dev = <&spi2>;
+		dc-gpios = <&gpio0 9 GPIO_ACTIVE_HIGH>;
+		reset-gpios = <&gpio0 29 GPIO_ACTIVE_LOW>;
+		write-only;
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		/*
+		 * GoodDisplay GDEY042T81 (4.2", SSD1683) via the vendored ssd16xx
+		 * driver (gen2 command set), dedicated solomon,ssd1683 quirk.
+		 *
+		 * Geometry: width = gate axis (300), height = source axis (400, /8).
+		 * LANDSCAPE via rotation=270 (HTILED): the source axis (400) becomes
+		 * horizontal (byte-packed, /8 ok) and the 300 gates become vertical
+		 * (no /8 needed) -> full 400x300 canvas, no clip. The vendored driver
+		 * patches get_capabilities to swap x/y for 90/270. BUSY active-HIGH.
+		 * full{}/partial{} empty -> OTP waveforms. partial{} present enables
+		 * fast partial refresh (only changed pixels, no black flash).
+		 *
+		 * (For PORTRAIT instead: set rotation=0 and width=304; then the
+		 * quirk's panel_gates=300 clip kicks in to reclaim the 4 px.)
+		 */
+		epaper: ssd1683@0 {
+			compatible = "solomon,ssd1683";
+			reg = <0>;
+			mipi-max-frequency = <4000000>;
+			width = <300>;
+			height = <400>;
+			busy-gpios = <&gpio0 2 GPIO_ACTIVE_HIGH>;
+			tssv = <0x80>;
+			rotation = <270>;
+
+			full {
+			};
+
+			partial {
+			};
+		};
+	};
+};

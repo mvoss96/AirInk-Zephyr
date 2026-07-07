@@ -1,0 +1,13 @@
+# Copyright (c) 2026 AirInk
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  Solomon Systech SSD1683 400x300 EPD display controller.
+
+  Functionally a Gen2 SSD16xx controller (same command set as SSD1680/SSD1681).
+  Not in mainline Zephyr; this project ships a vendored ssd16xx driver
+  (src/drivers/) with a matching quirk. Used by the GoodDisplay GDEY042T81.
+
+compatible: "solomon,ssd1683"
+
+include: solomon,ssd16xx-common.yaml
