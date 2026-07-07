@@ -5,6 +5,13 @@
 #include <stdlib.h>
 #include <lvgl.h>
 
+/* UI fonts (generated into src/fonts/, bpp=1). C linkage.
+ * B612 for all text; DSEG7 (7-segment, digits only) for the big sensor values. */
+extern "C" {
+extern const lv_font_t b612_48, b612_28, b612_16, b612_14;
+extern const lv_font_t dseg7_48;
+}
+
 namespace {
 
 /* One full-screen container per screen; only one is un-hidden at a time. */
@@ -102,7 +109,21 @@ uint16_t last_co2;
 int32_t last_temp_x100;
 uint16_t last_hum_x100;
 
+/* Sensor-screen fonts (big value / small unit / name). Default Montserrat;
+ * the host font-preview overrides these via ui::set_metric_fonts(). */
+const lv_font_t *f_big  = &dseg7_48;   /* big values: 7-segment (digits only) */
+const lv_font_t *f_unit = &b612_28;
+const lv_font_t *f_name = &b612_16;
+
 } // namespace
+
+void ui::set_metric_fonts(const _lv_font_t *big, const _lv_font_t *unit,
+			  const _lv_font_t *name)
+{
+	f_big = big;
+	f_unit = unit;
+	f_name = name;
+}
 
 int ui::init()
 {
@@ -117,15 +138,15 @@ int ui::init()
 
 	/* ---- boot screen ---- */
 	boot_scr = make_container(scr);
-	lv_obj_t *word = make_label(boot_scr, &lv_font_montserrat_48, SCR_W);
+	lv_obj_t *word = make_label(boot_scr, &b612_48, SCR_W);
 	lv_label_set_text(word, "AirInk");
 	lv_obj_align(word, LV_ALIGN_CENTER, 0, -30);
 	lv_obj_t *rule = make_divider(boot_scr, 180, 2);
 	lv_obj_align(rule, LV_ALIGN_CENTER, 0, 6);
-	lv_obj_t *sub = make_label(boot_scr, &lv_font_montserrat_16, SCR_W);
+	lv_obj_t *sub = make_label(boot_scr, &b612_16, SCR_W);
 	lv_label_set_text(sub, "Air Quality Monitor");
 	lv_obj_align(sub, LV_ALIGN_CENTER, 0, 34);
-	lv_obj_t *foot = make_label(boot_scr, &lv_font_montserrat_14, SCR_W);
+	lv_obj_t *foot = make_label(boot_scr, &b612_14, SCR_W);
 	lv_label_set_text(foot, "nRF52840 - Zephyr");
 	lv_obj_align(foot, LV_ALIGN_BOTTOM_MID, 0, -8);
 
@@ -139,28 +160,48 @@ int ui::init()
 	sensor_scr = make_container(scr);
 
 	auto make_metric = [&](lv_align_t align, int y, int w, int h,
-			       const char *label_txt) -> lv_obj_t * {
+			       const char *unit, const char *name) -> lv_obj_t * {
 		lv_obj_t *cell = lv_obj_create(sensor_scr);
 		lv_obj_remove_style_all(cell);
 		lv_obj_set_size(cell, w, h);
 		lv_obj_align(cell, align, 0, y);
 		lv_obj_clear_flag(cell, LV_OBJ_FLAG_SCROLLABLE);
-		lv_obj_set_flex_flow(cell, LV_FLEX_FLOW_COLUMN);
-		lv_obj_set_flex_align(cell, LV_FLEX_ALIGN_CENTER,
-				      LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-		lv_obj_set_style_pad_row(cell, 2, 0);
+		/* No layout on the cell: value row is centred, name pinned to bottom. */
 
-		lv_obj_t *val = make_label(cell, &lv_font_montserrat_48, w);
-		lv_obj_t *lbl = make_label(cell, &lv_font_montserrat_16, w);
-		lv_label_set_text(lbl, label_txt);
+		/* Value row: big number + small unit, unit bottom-aligned to the number
+		 * (FLEX_ALIGN_END on the cross axis). */
+		lv_obj_t *row = lv_obj_create(cell);
+		lv_obj_remove_style_all(row);
+		lv_obj_set_size(row, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+		lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+		lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+		lv_obj_set_flex_align(row, LV_FLEX_ALIGN_CENTER,
+				      LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
+		lv_obj_set_style_pad_column(row, 5, 0);   /* gap number<->unit */
+
+		lv_obj_t *val = make_label(row, f_big, 0);
+		lv_obj_t *u   = make_label(row, f_unit, 0);
+		lv_label_set_text(u, unit);
+		/* FLEX_ALIGN_END aligns box bottoms (descent lines), not text baselines.
+		 * The big font has a larger descent, so nudge the small unit up by the
+		 * descent difference to sit the two baselines on the same line. */
+		lv_obj_set_style_translate_y(u, (lv_coord_t)(f_unit->base_line -
+						 f_big->base_line), 0);
+
+		/* Value vertically centred in the cell; name pinned to the bottom edge. */
+		lv_obj_align(row, LV_ALIGN_CENTER, 0, 0);
+
+		lv_obj_t *nm = make_label(cell, f_name, w);
+		lv_label_set_text(nm, name);
+		lv_obj_align(nm, LV_ALIGN_BOTTOM_MID, 0, -6);
 		return val;
 	};
 
 	constexpr int SPLIT_Y = 150;
 
-	/* CO2: full-width cell across the top half. */
-	co2_value = make_metric(LV_ALIGN_TOP_MID, 0, SCR_W, SPLIT_Y, "CO2");
-	lv_label_set_text(co2_value, "-- ppm");
+	/* CO2: full-width cell across the top half. Big number + "ppm", "CO2" beneath. */
+	co2_value = make_metric(LV_ALIGN_TOP_MID, 0, SCR_W, SPLIT_Y, "ppm", "CO2");
+	lv_label_set_text(co2_value, "--");
 
 	/* Divider between the CO2 header and the bottom half. */
 	lv_obj_t *hdiv = make_divider(sensor_scr, SCR_W - 4, 2);
@@ -173,18 +214,18 @@ int ui::init()
 	const int cell_h = SCR_H - cell_top;
 	const int cell_w = SCR_W / 2;
 
-	hum_value = make_metric(LV_ALIGN_TOP_LEFT, cell_top, cell_w, cell_h, "Humidity");
-	lv_label_set_text(hum_value, "-- %");
+	hum_value = make_metric(LV_ALIGN_TOP_LEFT, cell_top, cell_w, cell_h, "%", "Humidity");
+	lv_label_set_text(hum_value, "--");
 
-	temp_value = make_metric(LV_ALIGN_TOP_RIGHT, cell_top, cell_w, cell_h, "Temperature");
-	lv_label_set_text(temp_value, "-- C");
+	temp_value = make_metric(LV_ALIGN_TOP_RIGHT, cell_top, cell_w, cell_h, "\xC2\xB0""C", "Temperature");
+	lv_label_set_text(temp_value, "--");
 
 	/* ---- error screen ---- */
 	error_scr = make_container(scr);
-	err_title_lbl = make_label(error_scr, &lv_font_montserrat_28, SCR_W);
+	err_title_lbl = make_label(error_scr, &b612_28, SCR_W);
 	lv_label_set_text(err_title_lbl, "SENSOR ERROR");
 	lv_obj_align(err_title_lbl, LV_ALIGN_CENTER, 0, -20);
-	err_detail_lbl = make_label(error_scr, &lv_font_montserrat_16, SCR_W);
+	err_detail_lbl = make_label(error_scr, &b612_16, SCR_W);
 	lv_label_set_text(err_detail_lbl, "");
 	lv_obj_align(err_detail_lbl, LV_ALIGN_CENTER, 0, 20);
 
@@ -210,15 +251,15 @@ void ui::show_reading(uint16_t co2_ppm, int32_t temp_c_x100, uint16_t hum_x100)
 
 	char buf[24];
 
-	snprintf(buf, sizeof(buf), "%u ppm", co2_ppm);
+	snprintf(buf, sizeof(buf), "%u", co2_ppm);
 	lv_label_set_text(co2_value, buf);
 
-	snprintf(buf, sizeof(buf), "%u %%", (unsigned)(hum_x100 / 100));
+	snprintf(buf, sizeof(buf), "%u", (unsigned)(hum_x100 / 100));
 	lv_label_set_text(hum_value, buf);
 
 	const int whole = temp_c_x100 / 100;
 	const int frac = abs(temp_c_x100 % 100) / 10;
-	snprintf(buf, sizeof(buf), "%d.%d C", whole, frac);
+	snprintf(buf, sizeof(buf), "%d.%d", whole, frac);
 	lv_label_set_text(temp_value, buf);
 
 	/* Full refresh on the first sensor frame (screen change) and periodically

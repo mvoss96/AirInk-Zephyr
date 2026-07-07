@@ -7,6 +7,12 @@ target_sources(app PRIVATE
 	src/main.cpp
 	src/display_ui.cpp
 	src/ui_platform_zephyr.cpp
+	# UI fonts (1bpp), generated via lv_font_conv: B612 for text, DSEG7 for values.
+	src/fonts/b612_48.c
+	src/fonts/b612_28.c
+	src/fonts/b612_16.c
+	src/fonts/b612_14.c
+	src/fonts/dseg7_48.c
 	# Vendored SSD16xx driver (ssd1680 quirk raised to 400x400 for the
 	# GDEY042T81/SSD1683). Paired with CONFIG_SSD16XX=n.
 	src/drivers/ssd16xx.c

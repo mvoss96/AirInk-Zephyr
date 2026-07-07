@@ -78,9 +78,28 @@ if ($rebuild) {
     Write-Host "==> Using cached LVGL (build.ps1 -Clean to rebuild)" -ForegroundColor DarkGray
 }
 
+# UI fonts live in src/fonts/ (single source of truth, shared with the firmware)
+# -> cached fonts.o, rebuilt when any of them changes.
+$fontObj = Join-Path $obj "fonts.o"
+$fontSrc = @(Get-ChildItem -Path (Join-Path $src "fonts") -Filter *.c -ErrorAction SilentlyContinue)
+if ($fontSrc.Count -gt 0) {
+    $newest = ($fontSrc | Measure-Object -Property LastWriteTime -Maximum).Maximum
+    if ($Clean -or -not (Test-Path $fontObj) -or $newest -gt (Get-Item $fontObj).LastWriteTime) {
+        Write-Host "==> Compiling $($fontSrc.Count) UI fonts (cached)" -ForegroundColor Cyan
+        $frsp = Join-Path $obj "fonts.rsp"
+        ($fontSrc | ForEach-Object { '"' + ($_.FullName -replace '\\','/') + '"' }) |
+            Set-Content -Path $frsp -Encoding ASCII
+        & $Gcc -r -O1 @warn @def @inc "@$frsp" -o $fontObj
+        if ($LASTEXITCODE -ne 0) { throw "font compile failed" }
+    }
+}
+
 Write-Host "==> Linking airink_sim.exe" -ForegroundColor Cyan
 $exe = Join-Path $obj "airink_sim.exe"
-& $Gcc -O1 $lvglObj @cppObj -lstdc++ -lm -o $exe
+$linkObjs = @($lvglObj)
+if (Test-Path $fontObj) { $linkObjs += $fontObj }
+$linkObjs += $cppObj
+& $Gcc -O1 @linkObjs -lstdc++ -lm -o $exe
 if ($LASTEXITCODE -ne 0) { throw "link failed" }
 
 Write-Host "==> Rendering screens" -ForegroundColor Cyan
