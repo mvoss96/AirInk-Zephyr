@@ -21,8 +21,10 @@
 static uint32_t pngw_crc32(const uint8_t *a, size_t na, const uint8_t *b, size_t nb)
 {
 	uint32_t c = 0xFFFFFFFFu;
-	auto fold = [&](const uint8_t *p, size_t n) {
-		for (size_t i = 0; i < n; i++) {
+	auto fold = [&](const uint8_t *p, size_t n)
+	{
+		for (size_t i = 0; i < n; i++)
+		{
 			c ^= p[i];
 			for (int k = 0; k < 8; k++)
 				c = (c >> 1) ^ (0xEDB88320u & (uint32_t)(-(int)(c & 1)));
@@ -35,8 +37,8 @@ static uint32_t pngw_crc32(const uint8_t *a, size_t na, const uint8_t *b, size_t
 
 static void pngw_put32(FILE *f, uint32_t v)
 {
-	uint8_t b[4] = { (uint8_t)(v >> 24), (uint8_t)(v >> 16),
-			 (uint8_t)(v >> 8), (uint8_t)v };
+	uint8_t b[4] = {(uint8_t)(v >> 24), (uint8_t)(v >> 16),
+					(uint8_t)(v >> 8), (uint8_t)v};
 	fwrite(b, 1, 4, f);
 }
 
@@ -44,7 +46,8 @@ static void pngw_chunk(FILE *f, const char *type, const uint8_t *data, size_t le
 {
 	pngw_put32(f, (uint32_t)len);
 	fwrite(type, 1, 4, f);
-	if (len) fwrite(data, 1, len, f);
+	if (len)
+		fwrite(data, 1, len, f);
 	pngw_put32(f, pngw_crc32((const uint8_t *)type, 4, data, len));
 }
 
@@ -52,9 +55,10 @@ static void pngw_chunk(FILE *f, const char *type, const uint8_t *data, size_t le
 static int write_gray_png(const char *path, const uint8_t *gray, int w, int h)
 {
 	FILE *f = fopen(path, "wb");
-	if (!f) return -1;
+	if (!f)
+		return -1;
 
-	static const uint8_t sig[8] = { 137, 80, 78, 71, 13, 10, 26, 10 };
+	static const uint8_t sig[8] = {137, 80, 78, 71, 13, 10, 26, 10};
 	fwrite(sig, 1, 8, f);
 
 	uint8_t ihdr[13] = {
@@ -67,34 +71,51 @@ static int write_gray_png(const char *path, const uint8_t *gray, int w, int h)
 	/* raw = per row: filter byte 0 + w pixels */
 	size_t raw_len = (size_t)h * (1 + (size_t)w);
 	uint8_t *raw = (uint8_t *)malloc(raw_len);
-	for (int y = 0, o = 0; y < h; y++) {
+	for (int y = 0, o = 0; y < h; y++)
+	{
 		raw[o++] = 0;
 		memcpy(raw + o, gray + (size_t)y * w, w);
 		o += w;
 	}
 
 	/* zlib stream: header + DEFLATE stored blocks + Adler-32 */
-	size_t nblk = (raw_len + 65534) / 65535; if (!nblk) nblk = 1;
+	size_t nblk = (raw_len + 65534) / 65535;
+	if (!nblk)
+		nblk = 1;
 	uint8_t *idat = (uint8_t *)malloc(2 + nblk * 5 + raw_len + 4);
 	size_t p = 0;
-	idat[p++] = 0x78; idat[p++] = 0x01;
-	for (size_t off = 0, left = raw_len; left; ) {
+	idat[p++] = 0x78;
+	idat[p++] = 0x01;
+	for (size_t off = 0, left = raw_len; left;)
+	{
 		size_t n = left > 65535 ? 65535 : left;
 		idat[p++] = (n == left) ? 1 : 0;
-		idat[p++] = (uint8_t)n; idat[p++] = (uint8_t)(n >> 8);
-		idat[p++] = (uint8_t)~n; idat[p++] = (uint8_t)(~n >> 8);
+		idat[p++] = (uint8_t)n;
+		idat[p++] = (uint8_t)(n >> 8);
+		idat[p++] = (uint8_t)~n;
+		idat[p++] = (uint8_t)(~n >> 8);
 		memcpy(idat + p, raw + off, n);
-		p += n; off += n; left -= n;
+		p += n;
+		off += n;
+		left -= n;
 	}
 	uint32_t a = 1, b = 0;
-	for (size_t i = 0; i < raw_len; i++) { a = (a + raw[i]) % 65521; b = (b + a) % 65521; }
+	for (size_t i = 0; i < raw_len; i++)
+	{
+		a = (a + raw[i]) % 65521;
+		b = (b + a) % 65521;
+	}
 	uint32_t adler = (b << 16) | a;
-	idat[p++] = (uint8_t)(adler >> 24); idat[p++] = (uint8_t)(adler >> 16);
-	idat[p++] = (uint8_t)(adler >> 8);  idat[p++] = (uint8_t)adler;
+	idat[p++] = (uint8_t)(adler >> 24);
+	idat[p++] = (uint8_t)(adler >> 16);
+	idat[p++] = (uint8_t)(adler >> 8);
+	idat[p++] = (uint8_t)adler;
 
 	pngw_chunk(f, "IDAT", idat, p);
 	pngw_chunk(f, "IEND", nullptr, 0);
-	free(idat); free(raw); fclose(f);
+	free(idat);
+	free(raw);
+	fclose(f);
 	return 0;
 }
 

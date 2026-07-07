@@ -18,16 +18,18 @@ $ErrorActionPreference = "Stop"
 
 # OS-aware defaults. $IsWindows is $null on Windows PowerShell 5.1 -> treat as Windows.
 $onWindows = ($IsWindows -ne $false)
-if (-not $Gcc)  { $Gcc  = if ($onWindows) { "C:\msys64\mingw64\bin\gcc.exe" } else { "gcc" } }
-if (-not $Gpp)  { $Gpp  = if ($onWindows) { "C:\msys64\mingw64\bin\g++.exe" } else { "g++" } }
-if (-not $Lvgl) { $Lvgl = if ($onWindows) { "C:\ncs\v3.3.0\modules\lib\gui\lvgl" }
-                          else { "$HOME/ncs/v3.3.0/modules/lib/gui/lvgl" } }
+if (-not $Gcc) { $Gcc = if ($onWindows) { "C:\msys64\mingw64\bin\gcc.exe" } else { "gcc" } }
+if (-not $Gpp) { $Gpp = if ($onWindows) { "C:\msys64\mingw64\bin\g++.exe" } else { "g++" } }
+if (-not $Lvgl) {
+    $Lvgl = if ($onWindows) { "C:\ncs\v3.3.0\modules\lib\gui\lvgl" }
+    else { "$HOME/ncs/v3.3.0/modules/lib/gui/lvgl" } 
+}
 
-$sim  = $PSScriptRoot
+$sim = $PSScriptRoot
 $root = Split-Path $sim -Parent
-$src  = Join-Path $root "src"
-$out  = Join-Path $sim "out"
-$obj  = Join-Path $sim "build"
+$src = Join-Path $root "src"
+$out = Join-Path $sim "out"
+$obj = Join-Path $sim "build"
 New-Item -ItemType Directory -Force -Path $out, $obj | Out-Null
 
 $inc = @("-I$Lvgl", "-I$sim", "-I$src")
@@ -36,7 +38,8 @@ $warn = @("-w")   # LVGL is noisy; we only care about our own code compiling
 
 Write-Host "==> Compiling C++ (UI + sim harness)" -ForegroundColor Cyan
 $cppSrc = @(
-    (Join-Path $src "display_ui.cpp"),
+    (Join-Path $src "ui/display_ui.cpp"),
+    (Join-Path $sim "ui_platform_sim.cpp"),
     (Join-Path $sim "sim.cpp")
 )
 $cppObj = @()
@@ -51,9 +54,9 @@ foreach ($f in $cppSrc) {
 # object (build/lvgl.o) and reuse it. Rebuild only on -Clean, if the cache is
 # missing, or if lv_conf.h was touched (that re-shapes the whole LVGL build).
 $lvglObj = Join-Path $obj "lvgl.o"
-$conf    = Join-Path $sim "lv_conf.h"
+$conf = Join-Path $sim "lv_conf.h"
 $rebuild = $Clean -or -not (Test-Path $lvglObj) -or
-           ((Get-Item $conf).LastWriteTime -gt (Get-Item $lvglObj).LastWriteTime)
+((Get-Item $conf).LastWriteTime -gt (Get-Item $lvglObj).LastWriteTime)
 
 if ($rebuild) {
     Write-Host "==> Compiling LVGL (cached afterwards)" -ForegroundColor Cyan
@@ -61,20 +64,21 @@ if ($rebuild) {
     # else under src/ is guarded by LV_USE_* and compiles to ~nothing when disabled.
     # Regex is separator-agnostic so it also excludes on Linux (forward slashes).
     $lvglSrc = Get-ChildItem -Recurse -Path (Join-Path $Lvgl "src") -Filter *.c |
-        Where-Object { $_.FullName -notmatch '[\\/]drivers[\\/]' } |
-        ForEach-Object { $_.FullName }
+    Where-Object { $_.FullName -notmatch '[\\/]drivers[\\/]' } |
+    ForEach-Object { $_.FullName }
     Write-Host "    $($lvglSrc.Count) LVGL .c files"
 
     # gcc @responsefile to dodge the Windows command-line length limit.
     # NB: gcc unescapes backslashes inside @files, so emit forward slashes.
     $rsp = Join-Path $obj "lvgl_sources.rsp"
-    ($lvglSrc | ForEach-Object { '"' + ($_ -replace '\\','/') + '"' }) |
-        Set-Content -Path $rsp -Encoding ASCII
+    ($lvglSrc | ForEach-Object { '"' + ($_ -replace '\\', '/') + '"' }) |
+    Set-Content -Path $rsp -Encoding ASCII
 
     # -r links all the compiled units into one relocatable object we can cache.
     & $Gcc -r -O1 @warn @def @inc "@$rsp" -o $lvglObj
     if ($LASTEXITCODE -ne 0) { throw "LVGL compile failed" }
-} else {
+}
+else {
     Write-Host "==> Using cached LVGL (build.ps1 -Clean to rebuild)" -ForegroundColor DarkGray
 }
 
@@ -87,8 +91,8 @@ if ($fontSrc.Count -gt 0) {
     if ($Clean -or -not (Test-Path $fontObj) -or $newest -gt (Get-Item $fontObj).LastWriteTime) {
         Write-Host "==> Compiling $($fontSrc.Count) UI fonts (cached)" -ForegroundColor Cyan
         $frsp = Join-Path $obj "fonts.rsp"
-        ($fontSrc | ForEach-Object { '"' + ($_.FullName -replace '\\','/') + '"' }) |
-            Set-Content -Path $frsp -Encoding ASCII
+        ($fontSrc | ForEach-Object { '"' + ($_.FullName -replace '\\', '/') + '"' }) |
+        Set-Content -Path $frsp -Encoding ASCII
         & $Gcc -r -O1 @warn @def @inc "@$frsp" -o $fontObj
         if ($LASTEXITCODE -ne 0) { throw "font compile failed" }
     }
@@ -108,4 +112,4 @@ try { & $exe } finally { Pop-Location }
 if ($LASTEXITCODE -ne 0) { throw "sim run failed" }
 
 Write-Host "==> Done. Images in $out" -ForegroundColor Green
-Get-ChildItem $out -Include *.png,*.bmp -Recurse | Select-Object Name, Length
+Get-ChildItem $out -Include *.png, *.bmp -Recurse | Select-Object Name, Length
