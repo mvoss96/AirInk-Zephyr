@@ -1,5 +1,6 @@
 #include "display_ui.hpp"
 #include "ui_platform.hpp"
+#include "../version.hpp"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -216,8 +217,13 @@ namespace
 		lv_obj_align(sub, LV_ALIGN_CENTER, 0, 36);
 
 		lv_obj_t *foot = make_label(boot_root, &b612_14, CONTENT_W);
-		lv_label_set_text(foot, "nRF52840 - Zephyr");
-		lv_obj_align(foot, LV_ALIGN_BOTTOM_MID, 0, -8);
+		lv_label_set_text(foot, "by Marcus Voss");
+		lv_obj_align(foot, LV_ALIGN_BOTTOM_MID, 0, -24);
+
+		/* Firmware version + build date/time (compile-time). */
+		lv_obj_t *build = make_label(boot_root, &b612_14, CONTENT_W);
+		lv_label_set_text(build, "v" AIRINK_VERSION "  " __DATE__ "  " __TIME__);
+		lv_obj_align(build, LV_ALIGN_BOTTOM_MID, 0, -6);
 	}
 
 	void build_sensor(lv_obj_t *scr)

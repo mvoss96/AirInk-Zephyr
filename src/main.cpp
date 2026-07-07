@@ -3,6 +3,7 @@
 
 #include "sensors/scd41.hpp"
 #include "ui/display_ui.hpp"
+#include "version.hpp"
 
 /* Time between single-shot measurements. Each fetch itself blocks ~5 s, and a
  * full 4.2" e-paper refresh takes a few seconds */
@@ -14,7 +15,8 @@ int main(void)
 {
 	const bool display_ok = (ui::init() == 0);
 
-	printk("AirInk started (display %s)\n", display_ok ? "ok" : "FAILED");
+	printk("AirInk v%s (%s %s) started (display %s)\n",
+	       AIRINK_VERSION, __DATE__, __TIME__, display_ok ? "ok" : "FAILED");
 
 	if (sensor.init() < 0)
 	{
