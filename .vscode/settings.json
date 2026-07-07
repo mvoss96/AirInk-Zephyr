@@ -1,0 +1,8 @@
+{
+    // Better Comments (aaron-bond.better-comments) re-colors every line in a
+    // block comment that starts with `*` using its green `*` tag, which makes
+    // the `/*` opening line (gray) and the ` * ` continuation lines (green)
+    // render in two colors. Disabling multiline processing keeps block comments
+    // uniform while leaving the `//` tag highlighting (!, ?, TODO) intact.
+    "better-comments.multilineComments": false
+}

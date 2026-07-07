@@ -1,0 +1,16 @@
+{
+    "configurations": [
+        {
+            "name": "Zephyr",
+            "compileCommands": "${workspaceFolder}/build/AirInk/compile_commands.json",
+            "compilerPath": "C:/ncs/toolchains/936afb6332/opt/zephyr-sdk/arm-zephyr-eabi/bin/arm-zephyr-eabi-gcc.exe",
+            "forcedInclude": [
+                "${workspaceFolder}/build/AirInk/zephyr/include/generated/zephyr/autoconf.h"
+            ],
+            "cStandard": "c11",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "windows-gcc-arm"
+        }
+    ],
+    "version": 4
+}
