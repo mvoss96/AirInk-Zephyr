@@ -80,9 +80,36 @@
 	};
 };
 
-/* Free P0.09 (DC) and P0.10 (CS); they are UART0 TX/RX on this board. */
+/*
+ * Debug console on uart0, remapped. The board's default uart0 pins are
+ * P0.09/P0.10 — which we use for the display DC/CS — so move uart0 to free,
+ * broken-out pins: TX=P1.04, RX=P1.06. The console runs over this UART instead
+ * of USB CDC ACM (power saving; see prj.conf). Wire a USB-serial adapter's RX to
+ * P1.04 (+ GND) to read printk; the adapter's TX -> P1.06 for future input.
+ */
+&pinctrl {
+	uart0_default_alt: uart0_default_alt {
+		group1 {
+			psels = <NRF_PSEL(UART_TX, 1, 4)>,
+				<NRF_PSEL(UART_RX, 1, 6)>;
+		};
+	};
+
+	uart0_sleep_alt: uart0_sleep_alt {
+		group1 {
+			psels = <NRF_PSEL(UART_TX, 1, 4)>,
+				<NRF_PSEL(UART_RX, 1, 6)>;
+			low-power-enable;
+		};
+	};
+};
+
 &uart0 {
-	status = "disabled";
+	status = "okay";
+	current-speed = <115200>;
+	pinctrl-0 = <&uart0_default_alt>;
+	pinctrl-1 = <&uart0_sleep_alt>;
+	pinctrl-names = "default", "sleep";
 };
 
 /* Remap SPI2 to the e-paper wiring: SCK=P1.11, MOSI=P1.13 (write-only, no MISO) */
@@ -109,6 +136,7 @@
 / {
 	chosen {
 		zephyr,display = &epaper;
+		zephyr,console = &uart0;   /* override the board's USB CDC ACM console */
 	};
 
 	mipi_dbi_epaper {
