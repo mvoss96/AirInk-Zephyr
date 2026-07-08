@@ -36,7 +36,47 @@ namespace
 
 	/* Status bar (never hidden). */
 	lv_obj_t *status_bar;
-	lv_obj_t *batt_frame, *batt_fill, *batt_pct_lbl, *link_lbl;
+	lv_obj_t *batt_frame, *batt_fill, *batt_bolt, *batt_pct_lbl, *link_lbl;
+	int last_charging = -1;
+
+	/* Charging bolt as a filled 1bpp image (I1: index0 = black bolt, index1 =
+	 * white bg, which is invisible on the white status bar). Shown in place of
+	 * the percentage while charging. 12x16, generated from ASCII art. */
+	const uint8_t bolt_map[] = {
+		0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff, 0xff, /* I1 palette: black, white */
+		0xff, 0xff,
+		0xfd, 0xff,
+		0xf9, 0xff,
+		0xf1, 0xff,
+		0xf3, 0xff,
+		0xe3, 0xff,
+		0xc3, 0xff,
+		0xc0, 0x3f,
+		0x80, 0x7f,
+		0x00, 0x7f,
+		0xf0, 0xff,
+		0xf1, 0xff,
+		0xe3, 0xff,
+		0xe7, 0xff,
+		0xef, 0xff,
+		0xdf, 0xff,
+		0xff, 0xff,
+		0xff, 0xff,
+	};
+	const lv_image_dsc_t bolt_img = {
+		.header = {
+			.magic = LV_IMAGE_HEADER_MAGIC,
+			.cf = LV_COLOR_FORMAT_I1,
+			.flags = 0,
+			.w = 13,
+			.h = 18,
+			.stride = 2,
+			.reserved_2 = 0,
+		},
+		.data_size = sizeof(bolt_map),
+		.data = bolt_map,
+		.reserved = NULL,
+	};
 
 	/* Content views (exactly one un-hidden at a time). */
 	lv_obj_t *boot_root;
@@ -190,6 +230,13 @@ namespace
 		batt_pct_lbl = make_label(status_bar, &dseg7_18, 0);
 		lv_obj_align_to(batt_pct_lbl, batt_frame, LV_ALIGN_OUT_RIGHT_MID, 10, 0);
 		lv_label_set_text(batt_pct_lbl, "");
+
+		/* Charging bolt, shown in place of the percentage while USB is present
+		 * (see set_battery()). Same anchor as the number. */
+		batt_bolt = lv_image_create(status_bar);
+		lv_image_set_src(batt_bolt, &bolt_img);
+		lv_obj_align_to(batt_bolt, batt_frame, LV_ALIGN_OUT_RIGHT_MID, 10, 0);
+		lv_obj_add_flag(batt_bolt, LV_OBJ_FLAG_HIDDEN);
 
 		/* Link: short text token, right-aligned. */
 		link_lbl = make_label(status_bar, &b612_14, 0);
@@ -494,26 +541,38 @@ void ui::show_reset(uint8_t seconds_left)
 	have_last_reading = false;
 }
 
-void ui::set_battery(uint8_t percent, bool /*charging*/)
+void ui::set_battery(uint8_t percent, bool charging)
 {
 	if (percent > 100)
 	{
 		percent = 100;
 	}
-	if ((int)percent == last_batt_pct)
+	if ((int)percent == last_batt_pct && (int)charging == last_charging)
 	{
 		return;
 	}
 
-	/* Fill the ~20px interior of the frame proportionally. */
+	/* Fill always shows the level. */
 	lv_obj_set_width(batt_fill, (lv_coord_t)(percent * 20 / 100));
-	/* DSEG7 digits, no '%' (the font has no percent glyph). */
-	char buf[8];
-	snprintf(buf, sizeof(buf), "%u", percent);
-	lv_label_set_text(batt_pct_lbl, buf);
+
+	/* Charging: show the bolt in place of the percentage number. */
+	if (charging)
+	{
+		lv_obj_add_flag(batt_pct_lbl, LV_OBJ_FLAG_HIDDEN);
+		lv_obj_clear_flag(batt_bolt, LV_OBJ_FLAG_HIDDEN);
+	}
+	else
+	{
+		char buf[8]; /* DSEG7 digits, no '%' (the font has no percent glyph). */
+		snprintf(buf, sizeof(buf), "%u", percent);
+		lv_label_set_text(batt_pct_lbl, buf);
+		lv_obj_clear_flag(batt_pct_lbl, LV_OBJ_FLAG_HIDDEN);
+		lv_obj_add_flag(batt_bolt, LV_OBJ_FLAG_HIDDEN);
+	}
 
 	refresh(false); /* status-bar only: partial, no flash */
 	last_batt_pct = percent;
+	last_charging = charging;
 }
 
 void ui::set_link(Link state)

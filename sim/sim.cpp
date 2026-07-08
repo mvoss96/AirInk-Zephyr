@@ -73,7 +73,7 @@ int main()
 		return 1;
 	}
 	/* Seed the persistent status bar (battery + link) so it shows on every snapshot. */
-	ui::set_battery(87);
+	ui::set_battery(87, /*charging=*/true); /* boot: show the charging bolt */
 	ui::set_link(ui::Link::BleConnected);
 	snapshot("boot");
 
