@@ -6,6 +6,7 @@ project(AirInk)
 target_sources(app PRIVATE
 	src/main.cpp
 	src/sensors/scd41.cpp
+	src/sensors/battery.cpp
 	src/ui/display_ui.cpp
 	src/ui/ui_platform.cpp
 	# UI fonts (1bpp), generated via lv_font_conv: B612 for text, DSEG7 for values.
