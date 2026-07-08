@@ -55,9 +55,17 @@ int main(void)
 		snprintf(buf, sizeof(buf), "%u", (unsigned)n);
 		lv_label_set_text(label, buf);
 
-		/* PARTIAL refresh: bare lv_refr_now, no blanking -> fast/partial LUT. */
-		lv_refr_now(disp);
-		printk("partial-test: n=%u PARTIAL\n", (unsigned)n);
+		/* Every 10th = FULL (blanking on/off), else PARTIAL (bare lv_refr_now).
+		 * No sensor code -> isolates pure e-paper refresh energy on the PPK2. */
+		bool full = (n % 10 == 0);
+		if (full) {
+			plat::blanking_on();
+			lv_refr_now(disp);
+			plat::blanking_off();
+		} else {
+			lv_refr_now(disp);
+		}
+		printk("partial-test: n=%u %s\n", (unsigned)n, full ? "FULL" : "PARTIAL");
 	}
 	return 0;
 }
