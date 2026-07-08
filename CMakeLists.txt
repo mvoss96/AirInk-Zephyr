@@ -5,7 +5,9 @@ project(AirInk)
 
 target_sources(app PRIVATE
 	src/main.cpp
-	# src/partial_test.cpp  # partial-refresh counter test harness (swap in to use)
+	# Power/UI test harnesses — swap in (comment src/main.cpp) to use:
+	#   src/partial_test.cpp   # 1 Hz counter, full then partial refresh
+	#   src/power_test.cpp     # per-consumer isolation (SCD41/e-paper/idle), TEST_MODE
 	src/sensors/scd41.cpp
 	src/sensors/battery.cpp
 	src/ui/display_ui.cpp
