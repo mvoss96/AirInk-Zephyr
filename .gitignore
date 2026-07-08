@@ -1,2 +1,5 @@
 build*/
 sim/out/
+
+# Local MCP config (machine-specific absolute paths to the ppk2-mcp server)
+.mcp.json
