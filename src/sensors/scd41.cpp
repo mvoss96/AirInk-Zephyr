@@ -98,3 +98,37 @@ int scd41::sample(Scd41Reading *out)
 	out->hum_x100 = (uint16_t)(hum.val1 * 100 + hum.val2 / 10000);
 	return 0;
 }
+
+int scd41::sample_rht(Scd41Reading *out)
+{
+	/* Skip the CO2 photoacoustic pulse: measure_single_shot_rht_only (0x2196)
+	 * returns T+RH in ~50 ms at ~1000x less energy than a full read. Raw I2C
+	 * because the Zephyr driver only exposes the full single-shot. */
+	wake();
+
+	const uint8_t meas[2] = {0x21, 0x96};
+	if (i2c_write_dt(&scd41_bus, meas, sizeof(meas)) < 0)
+	{
+		return -EIO;
+	}
+	k_msleep(60); /* rht-only measurement time (< 50 ms per datasheet) */
+
+	const uint8_t rd_cmd[2] = {0xEC, 0x05}; /* read_measurement */
+	uint8_t rd[9];                          /* CO2+crc, T+crc, RH+crc */
+	if (i2c_write_dt(&scd41_bus, rd_cmd, sizeof(rd_cmd)) < 0 ||
+		i2c_read_dt(&scd41_bus, rd, sizeof(rd)) < 0)
+	{
+		return -EIO;
+	}
+
+	const uint16_t t_raw = ((uint16_t)rd[3] << 8) | rd[4];
+	const uint16_t h_raw = ((uint16_t)rd[6] << 8) | rd[7];
+	/* SCD4x: T = -45 + 175*raw/65535 [C], RH = 100*raw/65535 [%]. */
+	out->co2_ppm = 0; /* not measured in rht-only mode */
+	out->temp_x100 = -4500 + (int32_t)(17500LL * t_raw / 65535);
+	out->hum_x100 = (uint16_t)(10000LL * h_raw / 65535);
+
+	const uint8_t pd[2] = {0x36, 0xE0}; /* power_down */
+	i2c_write_dt(&scd41_bus, pd, sizeof(pd));
+	return 0;
+}
