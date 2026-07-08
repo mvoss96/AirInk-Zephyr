@@ -5,6 +5,7 @@
  */
 #include <zephyr/kernel.h>
 #include <zephyr/drivers/i2c.h>
+#include <zephyr/drivers/gpio.h>
 #include <zephyr/device.h>
 #include <zephyr/pm/device.h>
 #include <stdio.h>
@@ -25,6 +26,11 @@ extern const lv_font_t dseg7_48;
 #define MODE_EPD_PARTIAL    4  /* partial refresh, all 4 numbers change each second */
 #define MODE_IDLE           5  /* console UART suspended, sleep forever (idle floor) */
 #define TEST_MODE           MODE_IDLE
+/* MODE_IDLE sub-options: gate the ext_3v3 rail (panel+sensor) and/or suspend the
+ * SAADC to find the true idle floor. Flip per build to attribute components. */
+#define IDLE_RAIL_OFF       0
+#define IDLE_SAADC_OFF      0
+#define IDLE_PANEL_DSM      1  /* deep-sleep the SSD1683 (rail stays on) */
 
 static const struct i2c_dt_spec scd_bus = I2C_DT_SPEC_GET(DT_NODELABEL(scd41));
 static const struct device *const console_dev = DEVICE_DT_GET(DT_CHOSEN(zephyr_console));
@@ -114,8 +120,36 @@ int main(void)
 	}
 
 #else /* MODE_IDLE */
-	printk("IDLE: suspending console UART, sleeping\n");
+	printk("IDLE: rail_off=%d saadc_off=%d, suspending UART, sleeping\n",
+	       IDLE_RAIL_OFF, IDLE_SAADC_OFF);
 	k_msleep(200);
+#if IDLE_PANEL_DSM
+	/* Deep-sleep the SSD1683 (rail on). If idle drops, the panel standby was the
+	 * cost; if not, it's the ext_3v3 LDO quiescent. */
+	pm_device_action_run(DEVICE_DT_GET(DT_CHOSEN(zephyr_display)),
+			     PM_DEVICE_ACTION_SUSPEND);
+#endif
+#if IDLE_SAADC_OFF
+	pm_device_action_run(DEVICE_DT_GET(DT_NODELABEL(adc)),
+			     PM_DEVICE_ACTION_SUSPEND);
+#endif
+#if IDLE_RAIL_OFF
+	/* Park every line the ext_3v3 rail feeds BEFORE gating it, or the nRF
+	 * back-powers the unpowered panel through driven GPIOs (measured 10 mA).
+	 * Drive the push-pull control lines low; make the (externally pulled-up)
+	 * I2C + BUSY inputs. Then gate the rail (P0.13). E-paper keeps its image. */
+	const struct device *g0 = DEVICE_DT_GET(DT_NODELABEL(gpio0));
+	const struct device *g1 = DEVICE_DT_GET(DT_NODELABEL(gpio1));
+	gpio_pin_configure(g0, 9, GPIO_OUTPUT_LOW);   /* DC */
+	gpio_pin_configure(g0, 10, GPIO_OUTPUT_LOW);  /* CS */
+	gpio_pin_configure(g0, 29, GPIO_OUTPUT_LOW);  /* RST */
+	gpio_pin_configure(g0, 2, GPIO_INPUT);        /* BUSY */
+	gpio_pin_configure(g1, 11, GPIO_OUTPUT_LOW);  /* SCK */
+	gpio_pin_configure(g1, 13, GPIO_OUTPUT_LOW);  /* MOSI */
+	gpio_pin_configure(g0, 22, GPIO_INPUT);       /* SCL */
+	gpio_pin_configure(g0, 24, GPIO_INPUT);       /* SDA */
+	gpio_pin_configure(g0, 13, GPIO_OUTPUT_LOW);  /* ext_3v3 enable -> off */
+#endif
 	pm_device_action_run(console_dev, PM_DEVICE_ACTION_SUSPEND);
 	while (1) {
 		k_msleep(60000);

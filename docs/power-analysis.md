@@ -121,6 +121,47 @@ cadence as the single knob to trade battery life against CO₂ freshness.
 
 ---
 
+## Idle deep-dive (can we lower the 60 µA?)
+
+Attributed by toggling each consumer in the idle harness (deltas are J-Link-offset
+immune; the ~170 µA J-Link offset dominates the absolute reading so only deltas are
+trusted):
+
+| idle config | measured (w/ J-Link) | delta |
+|---|---|---|
+| baseline (panel standby) | 243 µA | — |
+| SAADC suspended | 243 µA | **0 µA** — the nrfx driver already fully disables the SAADC after each read |
+| panel deep-sleep (DSM) | 222 µA | **−21 µA** — panel controller standby |
+| panel DSM + rail gated | 177 µA | **−45 µA more** — ext_3v3 LDO quiescent + SCD41 |
+| **real app, idle gap** | **222 µA** | app already DSMs the panel ✓ |
+
+**Breakdown of the true ~60 µA idle:** ext_3v3 **LDO quiescent ~40–45 µA** (dominant)
++ panel ~5 µA (DSM'd) + SCD41 ~0.5 µA + nRF System-ON idle + LFCLK ~7 µA.
+
+**Conclusion: idle is already near firmware-optimal at the 30 s cadence.** The panel
+is deep-slept (the app does this, verified). The SAADC draws nothing. The nRF is in
+the right sleep mode. The remaining ~45 µA is the **ext_3v3 LDO quiescent** — a
+hardware property that firmware can only remove by **gating the rail**, and:
+
+- Gating naively **back-powers the unpowered panel** through driven GPIOs (measured
+  **10 mA**!). It requires parking every panel/sensor line (CS/DC/RST/SCK/MOSI low,
+  I²C/BUSY as inputs) first.
+- Even done cleanly, at the 30 s cadence it is **net-negative**: rail-off for ~29 s
+  saves 45 µA×29 s ≈ 1.3 mAs, but the panel loses its RAM/config so the next update
+  needs a re-init + full refresh (~3–5 mAs). The re-init costs more than the idle
+  saves.
+
+**When rail-gating *would* pay off:** only with long idle gaps (CO₂-only, no 30 s
+T+RH ticks) *or* combined with display-refresh quantization (below). A hardware
+lower-quiescent LDO/load-switch is the clean fix but is out of firmware scope.
+
+**Bigger lever than idle:** at the dual-cadence budget (118 mAs/300 s) the **T+RH
+display refreshes cost ~27 mAs — more than idle's ~18 mAs**. Quantizing the shown
+T+RH (e.g. 0.5 °C / 1 %) so the refresh-dedup skips unchanged ticks would save most
+of that *and* open long idle gaps where rail-gating finally pays. That's the higher-
+value next step; it needs on-panel verification (rail cycling + re-init), so it's for
+a supervised session, not an unattended run.
+
 ## Methodology / what was tested
 
 Isolation firmwares (`src/power_test.cpp`, `TEST_MODE`), each SWD-flashed and
