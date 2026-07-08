@@ -5,6 +5,7 @@ project(AirInk)
 
 target_sources(app PRIVATE
 	src/main.cpp
+	# src/partial_test.cpp  # partial-refresh counter test harness (swap in to use)
 	src/sensors/scd41.cpp
 	src/sensors/battery.cpp
 	src/ui/display_ui.cpp
