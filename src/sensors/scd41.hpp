@@ -14,9 +14,8 @@ struct Scd41Reading
 	uint16_t hum_x100; /* %RH * 100 */
 };
 
-class Scd41
+namespace scd41
 {
-public:
 	/* Check the device is ready and disable automatic self-calibration.
 	 * Returns 0 on success, <0 if the sensor is not present. */
 	int init();
@@ -24,4 +23,4 @@ public:
 	/* Take a single-shot measurement (blocks ~5 s) and fill *out.
 	 * Returns 0 on success, <0 on a fetch error. */
 	int sample(Scd41Reading *out);
-};
+}

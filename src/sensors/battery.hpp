@@ -9,20 +9,21 @@
  * Channels come from the devicetree `zephyr,user` io-channels [0]=ext, [1]=int.
  */
 
-struct BatteryReading {
-	int32_t ext_mv;   /* battery voltage via P0.31 divider (BAT+) */
+struct BatteryReading
+{
+	int32_t ext_mv; /* battery voltage via P0.31 divider (BAT+) */
 	int ext_pct;
-	int32_t int_mv;   /* supply voltage via internal VDDH/5 */
+	int32_t int_mv; /* supply voltage via internal VDDH/5 */
 	int int_pct;
-	bool charging;    /* USB present: VDDH sits well above BAT+ */
+	bool charging; /* USB present: VDDH sits well above BAT+ */
 };
 
-class Battery {
-public:
+namespace battery
+{
 	/* Ready-check and configure both ADC channels. 0 on success, <0 if the
 	 * ADC is not ready. */
 	int init();
 
 	/* Read both channels and fill *out. 0 on success, <0 on a read error. */
 	int sample(BatteryReading *out);
-};
+}

@@ -7,14 +7,11 @@
 #include "version.hpp"
 
 /* Time between single-shot measurements. Each fetch itself blocks ~5 s, and a
- * full 4.2" e-paper refresh takes a few seconds */
-#define MEASURE_INTERVAL_MS 60000
+ * full 4.2" e-paper refresh takes a few seconds. */
+static constexpr int MEASURE_INTERVAL_MS = 60000;
 
 /* Below this (on the primary/external channel) show the low-battery screen. */
 static constexpr int LOW_BATTERY_PCT = 5;
-
-static Scd41 sensor;
-static Battery battery;
 
 int main(void)
 {
@@ -23,7 +20,7 @@ int main(void)
 	printk("AirInk v%s (%s %s) started (display %s)\n",
 	       AIRINK_VERSION, __DATE__, __TIME__, display_ok ? "ok" : "FAILED");
 
-	if (sensor.init() < 0)
+	if (scd41::init() < 0)
 	{
 		printk("SCD41 not ready\n");
 		if (display_ok)
@@ -33,7 +30,7 @@ int main(void)
 		return 0; /* leave the error on screen */
 	}
 
-	if (battery.init() < 0)
+	if (battery::init() < 0)
 	{
 		printk("Battery ADC not ready (continuing without it)\n");
 	}
@@ -43,7 +40,7 @@ int main(void)
 		/* Battery: measure both channels, log both, feed the status bar from the
 		 * primary (external P0.31) channel. */
 		BatteryReading b{};
-		const bool batt_ok = (battery.sample(&b) == 0);
+		const bool batt_ok = (battery::sample(&b) == 0);
 		if (batt_ok)
 		{
 			printk("Batt ext %d mV (%d%%)  int %d mV (%d%%)  %s\n",
@@ -57,7 +54,7 @@ int main(void)
 
 		Scd41Reading r;
 
-		if (sensor.sample(&r) == 0)
+		if (scd41::sample(&r) == 0)
 		{
 			printk("CO2 %u ppm  T %d.%02d C  RH %d.%02d %%\n", r.co2_ppm, r.temp_x100 / 100, abs(r.temp_x100 % 100), r.hum_x100 / 100, r.hum_x100 % 100);
 

@@ -14,7 +14,7 @@ extern "C"
 namespace
 {
 
-	const struct device *const scd41 = DEVICE_DT_GET(DT_NODELABEL(scd41));
+	const struct device *const scd41_dev = DEVICE_DT_GET(DT_NODELABEL(scd41));
 	const struct i2c_dt_spec scd41_bus = I2C_DT_SPEC_GET(DT_NODELABEL(scd41));
 
 	/*
@@ -39,7 +39,7 @@ namespace
 
 		wake();
 
-		if (sensor_attr_get(scd41, SENSOR_CHAN_CO2,
+		if (sensor_attr_get(scd41_dev, SENSOR_CHAN_CO2,
 							(enum sensor_attribute)SENSOR_ATTR_SCD4X_AUTOMATIC_CALIB_ENABLE,
 							&asc) < 0)
 		{
@@ -54,14 +54,14 @@ namespace
 
 		struct sensor_value off{}; /* val1 = val2 = 0 -> ASC off */
 
-		if (sensor_attr_set(scd41, SENSOR_CHAN_CO2,
+		if (sensor_attr_set(scd41_dev, SENSOR_CHAN_CO2,
 							(enum sensor_attribute)SENSOR_ATTR_SCD4X_AUTOMATIC_CALIB_ENABLE,
 							&off) < 0)
 		{
 			printk("SCD41: failed to disable ASC\n");
 			return;
 		}
-		if (scd4x_persist_settings(scd41) < 0)
+		if (scd4x_persist_settings(scd41_dev) < 0)
 		{
 			printk("SCD41: failed to persist settings\n");
 			return;
@@ -71,9 +71,9 @@ namespace
 
 } // namespace
 
-int Scd41::init()
+int scd41::init()
 {
-	if (!device_is_ready(scd41))
+	if (!device_is_ready(scd41_dev))
 	{
 		return -ENODEV;
 	}
@@ -81,17 +81,17 @@ int Scd41::init()
 	return 0;
 }
 
-int Scd41::sample(Scd41Reading *out)
+int scd41::sample(Scd41Reading *out)
 {
-	if (sensor_sample_fetch(scd41) < 0)
+	if (sensor_sample_fetch(scd41_dev) < 0)
 	{
 		return -EIO;
 	}
 
 	struct sensor_value co2, temp, hum;
-	sensor_channel_get(scd41, SENSOR_CHAN_CO2, &co2);
-	sensor_channel_get(scd41, SENSOR_CHAN_AMBIENT_TEMP, &temp);
-	sensor_channel_get(scd41, SENSOR_CHAN_HUMIDITY, &hum);
+	sensor_channel_get(scd41_dev, SENSOR_CHAN_CO2, &co2);
+	sensor_channel_get(scd41_dev, SENSOR_CHAN_AMBIENT_TEMP, &temp);
+	sensor_channel_get(scd41_dev, SENSOR_CHAN_HUMIDITY, &hum);
 
 	out->co2_ppm = (uint16_t)co2.val1;
 	out->temp_x100 = temp.val1 * 100 + temp.val2 / 10000;
