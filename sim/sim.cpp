@@ -72,32 +72,38 @@ int main()
 		std::printf("ui::init failed\n");
 		return 1;
 	}
-	/* Seed the persistent status bar (battery + link) so it shows on every snapshot. */
+	/* Every frame: stage the changes, then one refresh() commits (as on device). */
 	ui::set_battery(87, /*charging=*/true); /* boot: show the charging bolt */
 	ui::set_link(ui::Link::BleConnected);
+	ui::refresh();
 	snapshot("boot");
 
 	g_tick_ms += 100;
-	ui::show_reading(842, 2345, 4500); /* 842 ppm, 23.4 C, 45 % */
+	ui::set_sensor(842, 2345, 4500); /* 842 ppm, 23.4 C, 45 % */
+	ui::refresh();
 	snapshot("sensor");
 
 	g_tick_ms += 100;
 	ui::set_link(ui::Link::ZigbeeConnected); /* link token -> ZB */
 	ui::set_battery(42);
-	ui::show_reading(1487, 2680, 6200); /* wide values */
+	ui::set_sensor(1487, 2680, 6200); /* wide values */
+	ui::refresh();
 	snapshot("sensor_high");
 
 	g_tick_ms += 100;
 	ui::set_battery(4); /* keep the status-bar glyph in sync with the warning */
-	ui::show_low_battery(4);
+	ui::set_low_battery(4);
+	ui::refresh();
 	snapshot("lowbat");
 
 	g_tick_ms += 100;
-	ui::show_reset(3); /* factory-reset countdown */
+	ui::set_reset(3); /* factory-reset countdown */
+	ui::refresh();
 	snapshot("reset");
 
 	g_tick_ms += 100;
-	ui::show_error("SENSOR ERROR", "SCD41 not responding");
+	ui::set_error("SENSOR ERROR", "SCD41 not responding");
+	ui::refresh();
 	snapshot("error");
 
 	std::printf("done\n");

@@ -19,6 +19,7 @@ LOG_MODULE_REGISTER(ssd16xx);
 #include <zephyr/sys/byteorder.h>
 
 #include <zephyr/display/ssd16xx.h>
+#include <zephyr/pm/device.h>
 #include "ssd16xx_regs.h"
 
 /**
@@ -988,6 +989,47 @@ static int ssd16xx_controller_init(const struct device *dev)
 	return 0;
 }
 
+#ifdef CONFIG_PM_DEVICE
+/* Local patch (ported from HappyPot): GxEPD2-style hibernate to cut the panel's
+ * idle draw. SUSPEND -> deep sleep mode 1 (RAM retained, <1 uA). RESUME -> HW
+ * reset + minimal re-init (profile/orientation only, no clear+update) so the next
+ * app write can be a partial refresh without a white flash. Bracketed around each
+ * LVGL refresh from the UI (plat::register_render_pm). */
+static int ssd16xx_resume(const struct device *dev)
+{
+	const struct ssd16xx_config *config = dev->config;
+	struct ssd16xx_data *data = dev->data;
+	int err;
+
+	err = mipi_dbi_reset(config->mipi_dev, SSD16XX_RESET_DELAY);
+	if (err < 0) {
+		return err;
+	}
+	k_msleep(SSD16XX_RESET_DELAY);
+
+	/* Force profile re-upload: the chip is fresh but data->profile still caches
+	 * the pre-suspend value. set_profile re-writes ENTRY_MODE from the cached
+	 * scan_mode, so orientation is restored implicitly. */
+	data->profile = SSD16XX_PROFILE_INVALID;
+
+	return ssd16xx_set_profile(dev, SSD16XX_PROFILE_FULL);
+}
+
+static int ssd16xx_pm_action(const struct device *dev,
+			     enum pm_device_action action)
+{
+	switch (action) {
+	case PM_DEVICE_ACTION_SUSPEND:
+		return ssd16xx_write_uint8(dev, SSD16XX_CMD_SLEEP_MODE,
+					   SSD16XX_SLEEP_MODE_DSM);
+	case PM_DEVICE_ACTION_RESUME:
+		return ssd16xx_resume(dev);
+	default:
+		return -ENOTSUP;
+	}
+}
+#endif /* CONFIG_PM_DEVICE */
+
 static int ssd16xx_init(const struct device *dev)
 {
 	const struct ssd16xx_config *config = dev->config;
@@ -1182,8 +1224,10 @@ static struct ssd16xx_quirks quirks_solomon_ssd1681 = {
 									\
 	static struct ssd16xx_data ssd16xx_data_ ## n;			\
 									\
+	PM_DEVICE_DT_DEFINE(n, ssd16xx_pm_action);			\
+									\
 	DEVICE_DT_DEFINE(n,						\
-			 ssd16xx_init, NULL,				\
+			 ssd16xx_init, PM_DEVICE_DT_GET(n),		\
 			 &ssd16xx_data_ ## n,				\
 			 &ssd16xx_cfg_ ## n,				\
 			 POST_KERNEL,					\

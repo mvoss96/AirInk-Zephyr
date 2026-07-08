@@ -5,6 +5,7 @@
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/display.h>
+#include <zephyr/pm/device.h>
 
 namespace
 {
@@ -34,16 +35,14 @@ namespace plat
 		printk("%s", msg);
 	}
 
-	void register_render_pm()
+	void display_resume()
 	{
-		/* No-op until the vendored ssd16xx driver implements pm_device actions.
-		 * Once it does (HappyPot-style: SUSPEND -> deep sleep mode 1, RESUME -> HW
-		 * reset + profile reload) plus CONFIG_PM_DEVICE=y, wire the panel deep-sleep
-		 * here:
-		 *   lv_display_t *d = lv_display_get_default();
-		 *   lv_display_add_event_cb(d, on_render_start, LV_EVENT_RENDER_START, NULL);
-		 *   lv_display_add_event_cb(d, on_render_ready, LV_EVENT_RENDER_READY, NULL);
-		 * with on_render_* calling pm_device_action_run(disp_dev, RESUME/SUSPEND). */
+		pm_device_action_run(disp_dev, PM_DEVICE_ACTION_RESUME);
+	}
+
+	void display_suspend()
+	{
+		pm_device_action_run(disp_dev, PM_DEVICE_ACTION_SUSPEND);
 	}
 
 } // namespace plat

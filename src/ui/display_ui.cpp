@@ -32,7 +32,7 @@ namespace
 	constexpr int SCR_W = 400, SCR_H = 300;
 	constexpr int STATUS_H = 28;
 	constexpr int CONTENT_Y = STATUS_H, CONTENT_W = SCR_W, CONTENT_H = SCR_H - STATUS_H;
-	constexpr int FULL_REFRESH_EVERY = 12;
+	constexpr int FULL_REFRESH_EVERY = 100;
 
 	/* Status bar (never hidden). */
 	lv_obj_t *status_bar;
@@ -85,16 +85,20 @@ namespace
 	lv_obj_t *lowbat_root, *lowbat_fill, *lowbat_pct_lbl;
 	lv_obj_t *reset_root, *reset_count_lbl;
 
-	/* Which view is up — for the full-vs-partial refresh decision. */
+	/* Views + refresh bookkeeping. Setters stage `pending_view` and dirty the
+	 * widgets; ui::refresh() commits: hide/show the view + ONE panel refresh. */
 	enum View
 	{
+		VIEW_NONE,
 		VIEW_BOOT,
 		VIEW_SENSOR,
 		VIEW_ERROR,
 		VIEW_LOWBAT,
 		VIEW_RESET
 	};
-	View cur_view = VIEW_BOOT;
+	View shown_view = VIEW_NONE;   /* what the panel currently shows */
+	View pending_view = VIEW_BOOT; /* staged by a set_<view>; committed by refresh() */
+	bool dirty;                    /* a setter changed something since the last refresh */
 	int partials_since_full;
 
 	/* Skip-refresh dedup (per data source). */
@@ -150,10 +154,13 @@ namespace
 	 * The ssd16xx driver does a partial refresh whenever blanking is off; wrapping the
 	 * flush in blanking on/off forces a full refresh instead.
 	 */
-	void refresh(bool full)
+	void flush(bool full)
 	{
 		lv_display_t *disp = lv_display_get_default();
 
+		/* Wake the panel for the whole refresh; the full-refresh update fires in
+		 * blanking_off(), so suspend only after that. */
+		plat::display_resume();
 		if (full)
 		{
 			plat::blanking_on();  /* select the full-refresh profile */
@@ -164,6 +171,7 @@ namespace
 		{
 			lv_refr_now(disp); /* partial refresh */
 		}
+		plat::display_suspend(); /* deep-sleep the panel until the next refresh */
 	}
 
 	void hide_all_content()
@@ -173,6 +181,18 @@ namespace
 		lv_obj_add_flag(error_root, LV_OBJ_FLAG_HIDDEN);
 		lv_obj_add_flag(lowbat_root, LV_OBJ_FLAG_HIDDEN);
 		lv_obj_add_flag(reset_root, LV_OBJ_FLAG_HIDDEN);
+	}
+
+	lv_obj_t *root_for(View v)
+	{
+		switch (v)
+		{
+		case VIEW_SENSOR: return sensor_root;
+		case VIEW_ERROR:  return error_root;
+		case VIEW_LOWBAT: return lowbat_root;
+		case VIEW_RESET:  return reset_root;
+		default:          return boot_root;
+		}
 	}
 
 	const char *link_token(ui::Link s)
@@ -423,26 +443,20 @@ int ui::init()
 	build_lowbat(scr);
 	build_reset(scr);
 
-	hide_all_content();
-	lv_obj_clear_flag(boot_root, LV_OBJ_FLAG_HIDDEN);
-
-	/* Hook panel deep-sleep onto the LVGL render lifecycle (no-op until the
-	 * ssd16xx driver gains PM support — see plat::register_render_pm). */
-	plat::register_render_pm();
-
-	refresh(true); /* boot splash: full refresh */
-	cur_view = VIEW_BOOT;
-	partials_since_full = 0;
+	/* Boot splash: pending_view is VIEW_BOOT and shown is VIEW_NONE, so refresh()
+	 * paints it with a full refresh. */
+	ui::refresh();
 	return 0;
 }
 
-void ui::show_reading(uint16_t co2_ppm, int32_t temp_c_x100, uint16_t hum_x100)
+void ui::set_sensor(uint16_t co2_ppm, int32_t temp_c_x100, uint16_t hum_x100)
 {
-	if (cur_view == VIEW_SENSOR && have_last_reading &&
-		co2_ppm == last_co2 && temp_c_x100 == last_temp_x100 &&
-		hum_x100 == last_hum)
+	pending_view = VIEW_SENSOR;
+
+	if (have_last_reading && co2_ppm == last_co2 &&
+		temp_c_x100 == last_temp_x100 && hum_x100 == last_hum)
 	{
-		return; /* nothing changed, already on the sensor view */
+		return; /* same values already on the widgets */
 	}
 
 	char buf[24];
@@ -455,49 +469,35 @@ void ui::show_reading(uint16_t co2_ppm, int32_t temp_c_x100, uint16_t hum_x100)
 	snprintf(buf, sizeof(buf), "%d.%d", whole, frac);
 	lv_label_set_text(temp_value, buf);
 
-	hide_all_content();
-	lv_obj_clear_flag(sensor_root, LV_OBJ_FLAG_HIDDEN);
-
-	/* Full on a view change and periodically to clear ghosting; partial for
-	 * ordinary value updates. */
-	const bool full = (cur_view != VIEW_SENSOR) ||
-					  partials_since_full >= FULL_REFRESH_EVERY;
-	refresh(full);
-
-	partials_since_full = full ? 0 : partials_since_full + 1;
-	cur_view = VIEW_SENSOR;
 	last_co2 = co2_ppm;
 	last_temp_x100 = temp_c_x100;
 	last_hum = hum_x100;
 	have_last_reading = true;
+	dirty = true;
 }
 
-void ui::show_error(const char *title, const char *detail)
+void ui::set_error(const char *title, const char *detail)
 {
+	pending_view = VIEW_ERROR;
 	if (title)
 	{
 		lv_label_set_text(err_title_lbl, title);
 	}
 	lv_label_set_text(err_detail_lbl, detail ? detail : "");
-
-	hide_all_content();
-	lv_obj_clear_flag(error_root, LV_OBJ_FLAG_HIDDEN);
-
-	refresh(true); /* error: full refresh */
-	partials_since_full = 0;
-	cur_view = VIEW_ERROR;
-	have_last_reading = false;
+	dirty = true;
 }
 
-void ui::show_low_battery(uint8_t percent)
+void ui::set_low_battery(uint8_t percent)
 {
 	if (percent > 100)
 	{
 		percent = 100;
 	}
-	if (cur_view == VIEW_LOWBAT && (int)percent == last_lowbat_pct)
+	pending_view = VIEW_LOWBAT;
+
+	if ((int)percent == last_lowbat_pct)
 	{
-		return;
+		return; /* same value already on the widgets */
 	}
 
 	/* Fill the ~122px interior of the big frame proportionally. */
@@ -506,39 +506,25 @@ void ui::show_low_battery(uint8_t percent)
 	snprintf(buf, sizeof(buf), "%u", percent);
 	lv_label_set_text(lowbat_pct_lbl, buf);
 
-	hide_all_content();
-	lv_obj_clear_flag(lowbat_root, LV_OBJ_FLAG_HIDDEN);
-
-	refresh(true); /* low battery: full refresh */
-	partials_since_full = 0;
-	cur_view = VIEW_LOWBAT;
 	last_lowbat_pct = percent;
-	have_last_reading = false;
+	dirty = true;
 }
 
-void ui::show_reset(uint8_t seconds_left)
+void ui::set_reset(uint8_t seconds_left)
 {
-	if (cur_view == VIEW_RESET && (int)seconds_left == last_reset_count)
+	pending_view = VIEW_RESET;
+
+	if ((int)seconds_left == last_reset_count)
 	{
-		return;
+		return; /* same value already on the widgets */
 	}
 
 	char buf[8];
 	snprintf(buf, sizeof(buf), "%u", seconds_left);
 	lv_label_set_text(reset_count_lbl, buf);
 
-	hide_all_content();
-	lv_obj_clear_flag(reset_root, LV_OBJ_FLAG_HIDDEN);
-
-	/* Full only on entry; countdown ticks are partial (fast, no flash). */
-	const bool full = (cur_view != VIEW_RESET) ||
-					  partials_since_full >= FULL_REFRESH_EVERY;
-	refresh(full);
-
-	partials_since_full = full ? 0 : partials_since_full + 1;
-	cur_view = VIEW_RESET;
 	last_reset_count = seconds_left;
-	have_last_reading = false;
+	dirty = true;
 }
 
 void ui::set_battery(uint8_t percent, bool charging)
@@ -570,9 +556,9 @@ void ui::set_battery(uint8_t percent, bool charging)
 		lv_obj_add_flag(batt_bolt, LV_OBJ_FLAG_HIDDEN);
 	}
 
-	refresh(false); /* status-bar only: partial, no flash */
 	last_batt_pct = percent;
 	last_charging = charging;
+	dirty = true;
 }
 
 void ui::set_link(Link state)
@@ -582,6 +568,30 @@ void ui::set_link(Link state)
 		return;
 	}
 	lv_label_set_text(link_lbl, link_token(state));
-	refresh(false);
 	last_link = (int)state;
+	dirty = true;
+}
+
+void ui::refresh()
+{
+	const bool view_changed = (pending_view != shown_view);
+	if (!dirty && !view_changed)
+	{
+		return; /* nothing changed since the last refresh */
+	}
+
+	if (view_changed)
+	{
+		hide_all_content();
+		lv_obj_clear_flag(root_for(pending_view), LV_OBJ_FLAG_HIDDEN);
+	}
+
+	/* Full on a view change and periodically to clear ghosting; partial for
+	 * in-place value / status-bar updates. */
+	const bool full = view_changed || partials_since_full >= FULL_REFRESH_EVERY;
+	flush(full);
+
+	partials_since_full = full ? 0 : partials_since_full + 1;
+	shown_view = pending_view;
+	dirty = false;
 }

@@ -16,6 +16,7 @@ namespace plat
     void blanking_on() {}
     void blanking_off() {}
     void log(const char *msg) { std::fputs(msg, stderr); }
-    void register_render_pm() {} /* no panel on the PC */
+    void display_resume() {}  /* no panel on the PC */
+    void display_suspend() {} /* no panel on the PC */
 
 } // namespace plat
