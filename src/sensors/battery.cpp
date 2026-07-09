@@ -1,10 +1,10 @@
 #include "battery.hpp"
+#include "battery_curve.hpp"
 #include "../util/ema.hpp"
 
 #include <errno.h>
 #include <zephyr/kernel.h>
 #include <zephyr/drivers/adc.h>
-#include <zephyr/sys/util.h>
 
 namespace
 {
@@ -17,28 +17,6 @@ namespace
 	 * battery terminal (BAT+). On battery only, the two are ~equal; on USB, VDDH is
 	 * the ~4.8 V USB rail, hundreds of mV above the cell. */
 	constexpr int32_t CHARGE_DETECT_MV = 300;
-
-	struct BatteryPoint
-	{
-		int32_t mv;
-		int pct;
-	};
-
-	/* Typical single-cell Li-Ion open-circuit curve, piecewise-linearized. */
-	constexpr BatteryPoint kCurve[] = {
-		{3300, 0},
-		{3600, 5},
-		{3680, 10},
-		{3740, 20},
-		{3770, 30},
-		{3790, 40},
-		{3820, 50},
-		{3870, 60},
-		{3920, 70},
-		{4000, 80},
-		{4110, 90},
-		{4200, 100},
-	};
 
 	/* Read one channel as cell voltage (pin voltage x `scale`, the divider ratio).
 	 *
@@ -85,30 +63,6 @@ namespace
 	// the user. Nothing needs tracking quickly -- charging is detected on the raw
 	// reading, and the slow settle costs nothing because the first sample seeds it.
 	Ema<5, 3> ext_mv_ema;
-
-	uint8_t mv_to_percent(int32_t mv)
-	{
-		if (mv <= kCurve[0].mv)
-		{
-			return 0;
-		}
-		if (mv >= kCurve[ARRAY_SIZE(kCurve) - 1].mv)
-		{
-			return 100;
-		}
-		for (size_t i = 1; i < ARRAY_SIZE(kCurve); ++i)
-		{
-			if (mv <= kCurve[i].mv)
-			{
-				const BatteryPoint lo = kCurve[i - 1];
-				const BatteryPoint hi = kCurve[i];
-				/* Interpolate in int (mv deltas overflow uint8_t); result is 0..100. */
-				const int pct = lo.pct + (int)((mv - lo.mv) * (hi.pct - lo.pct) / (hi.mv - lo.mv));
-				return (uint8_t)pct;
-			}
-		}
-		return 100;
-	}
 
 } // namespace
 

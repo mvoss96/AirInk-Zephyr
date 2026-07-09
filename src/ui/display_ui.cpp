@@ -1,4 +1,5 @@
 #include "display_ui.hpp"
+#include "quantize.hpp"
 #include "ui_platform.hpp"
 #include "../version.hpp"
 
@@ -465,8 +466,8 @@ void ui::set_sensor(uint16_t co2_ppm, int32_t temp_x100, uint16_t hum_x100)
 	 * both show "43") does not force an e-paper refresh. On the 30 s T+RH cadence a
 	 * no-change tick then costs ~0.16 mAs (SCD41 read only) instead of a ~3 mAs
 	 * refresh -- see docs/power-analysis.md. */
-	const int32_t temp_q = ((temp_x100 + (temp_x100 >= 0 ? 5 : -5)) / 10) * 10;
-	const uint16_t hum_q = (uint16_t)(((hum_x100 + 50) / 100) * 100);
+	const int32_t temp_q = quantize_temp_x100(temp_x100);
+	const uint16_t hum_q = quantize_hum_x100(hum_x100);
 
 	if (have_last_reading && co2_ppm == last_co2_ppm &&
 		temp_q == last_temp_x100 && hum_q == last_hum_x100)
