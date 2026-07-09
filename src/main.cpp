@@ -21,8 +21,14 @@ static void console_uart(bool on)
 
 static constexpr int TICK_MS = 30000;	   // 30 s between each measurement cycle (5 min CO2 + 30 s T+RH)
 static constexpr int CO2_EVERY_TICKS = 10; // full CO2 read every 10 ticks (5 min)
-static constexpr int LOW_BATTERY_PCT = 5;  // battery percent threshold for the low-battery warning on the display
 static constexpr int BATT_UNKNOWN = -1;	   // battery percent when the ADC read failed
+
+/* Low-battery hysteresis: enter at or below ENTER, leave only at or above EXIT (or
+ * once charging). The gap matters -- a single threshold would flap as the smoothed
+ * percent drifts across it, and each flap is a view change, i.e. a full e-paper
+ * refresh with its black flash. */
+static constexpr int LOW_BATTERY_ENTER_PCT = 5;
+static constexpr int LOW_BATTERY_EXIT_PCT = 8;
 
 /* Device mode. Measurement only runs in Normal; calibration/reset (later) switch
  * the mode and the button handler drives their flow. */
@@ -35,17 +41,62 @@ static Mode mode = Mode::Normal;
 static uint16_t last_co2_ppm;
 static uint32_t tick_count;
 
-/* One cycle: battery + SCD41 (full CO2 on every CO2_EVERY_TICKS-th tick, else
- * T+RH-only), then one display refresh. */
+/* Latched: while set, the SCD41 is not read at all (a CO2 single-shot is ~70 mAs,
+ * ~86 % of the energy budget). The panel keeps the low-battery screen without power,
+ * so the warning stays visible while the device coasts at its ~60 uA idle. */
+static bool low_battery;
+
+/* One cycle: battery, then (unless the battery is low) SCD41 -- full CO2 on every
+ * CO2_EVERY_TICKS-th tick, else T+RH-only -- then one display refresh. */
 static void do_measurement()
 {
-	const bool full_co2 = (tick_count % CO2_EVERY_TICKS) == 0;
-
-	/* Battery: sample every tick (cheap ADC, and the EMA wants that cadence) but only
-	 * stage it on the CO2 tick, so a percent step never forces an e-paper refresh on
-	 * the cheap T+RH ticks. BATT_UNKNOWN is the single encoding of "not read". */
+	/* Battery: sample every tick (cheap ADC, and the EMA wants that cadence).
+	 * BATT_UNKNOWN is the single encoding of "not read". */
 	BatteryReading b{};
 	const int batt_pct = (battery::sample(&b) == 0) ? b.ext_pct : BATT_UNKNOWN;
+
+	/* Update the latch. A failed read leaves the state as it was -- one bad ADC
+	 * sample must not resume the sensor on an empty cell, nor suspend it on a full
+	 * one. Charging always releases the latch: on USB, power is no longer scarce. */
+	if (batt_pct != BATT_UNKNOWN)
+	{
+		if (b.charging || batt_pct >= LOW_BATTERY_EXIT_PCT)
+		{
+			if (low_battery)
+			{
+				/* Resume on a full CO2 read: last_co2_ppm is stale, and if we booted
+				 * straight into low battery it was never read at all. */
+				tick_count = 0;
+			}
+			low_battery = false;
+		}
+		else if (batt_pct <= LOW_BATTERY_ENTER_PCT)
+		{
+			low_battery = true;
+		}
+	}
+
+	/* Low battery: stop measuring entirely and just keep the warning on screen. The
+	 * battery read above is all that still runs, so charging is noticed within a tick.
+	 * The setters dedup, so a stable percent costs no refresh at all. tick_count does
+	 * not advance -- the CO2 cadence resumes from a clean phase above. */
+	if (low_battery)
+	{
+		printk("[LOW] batt %d%%%s  measurement suspended\n",
+			   batt_pct, b.charging ? " CHG" : "");
+		if (batt_pct != BATT_UNKNOWN)
+		{
+			ui::set_battery((uint8_t)batt_pct, b.charging);
+			ui::set_low_battery((uint8_t)batt_pct);
+		}
+		ui::refresh();
+		return;
+	}
+
+	const bool full_co2 = (tick_count % CO2_EVERY_TICKS) == 0;
+
+	/* Stage the status bar only on the CO2 tick, so a percent step never forces an
+	 * e-paper refresh on the cheap T+RH ticks. */
 	if (full_co2 && batt_pct != BATT_UNKNOWN)
 	{
 		ui::set_battery((uint8_t)batt_pct, b.charging);
@@ -74,14 +125,7 @@ static void do_measurement()
 			   r.hum_x100 / 100, r.hum_x100 % 100,
 			   batt_pct, b.charging ? " CHG" : "");
 
-		if (batt_pct != BATT_UNKNOWN && batt_pct <= LOW_BATTERY_PCT)
-		{
-			ui::set_low_battery((uint8_t)batt_pct);
-		}
-		else
-		{
-			ui::set_sensor(r.co2_ppm, r.temp_x100, r.hum_x100);
-		}
+		ui::set_sensor(r.co2_ppm, r.temp_x100, r.hum_x100);
 	}
 
 	/* One panel refresh for the whole cycle (battery + view). */
