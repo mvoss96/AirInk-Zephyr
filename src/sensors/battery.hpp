@@ -15,8 +15,8 @@
  * bounces the % on the steep Li-Ion curve); `charging` is instantaneous. */
 struct BatteryReading
 {
-	int32_t ext_mv;  /* battery voltage via P0.31 divider (BAT+), smoothed */
-	uint8_t ext_pct; /* 0..100 */
+	int32_t bat_mv;  /* battery voltage via P0.31 divider (BAT+), smoothed */
+	uint8_t bat_pct; /* 0..100 */
 	bool charging;   /* USB present: VDDH sits well above BAT+ (instantaneous) */
 };
 

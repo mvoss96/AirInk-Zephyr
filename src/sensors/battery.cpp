@@ -100,7 +100,7 @@ int battery::sample(BatteryReading *out)
 	 * is the only use of the internal channel; its voltage goes no further. */
 	out->charging = (int_raw - ext_raw) > CHARGE_DETECT_MV;
 
-	out->ext_mv = ext_mv_ema.update(ext_raw);
-	out->ext_pct = mv_to_percent(out->ext_mv);
+	out->bat_mv = ext_mv_ema.update(ext_raw);
+	out->bat_pct = mv_to_percent(out->bat_mv);
 	return 0;
 }

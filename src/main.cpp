@@ -38,7 +38,7 @@ static bool low_battery;	  // latched; while set the SCD41 is not read at all
 static void do_measurement()
 {
 	BatteryReading b{};
-	const int batt_pct = (battery::sample(&b) == 0) ? b.ext_pct : BATT_UNKNOWN;
+	const int batt_pct = (battery::sample(&b) == 0) ? b.bat_pct : BATT_UNKNOWN;
 
 	if (batt_pct != BATT_UNKNOWN) // a failed read leaves the latch as it was
 	{
