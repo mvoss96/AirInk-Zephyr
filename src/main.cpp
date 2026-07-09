@@ -22,6 +22,7 @@ static void console_uart(bool on)
 static constexpr int TICK_MS = 30000;	   // 30 s between each measurement cycle (5 min CO2 + 30 s T+RH)
 static constexpr int CO2_EVERY_TICKS = 10; // full CO2 read every 10 ticks (5 min)
 static constexpr int LOW_BATTERY_PCT = 5;  // battery percent threshold for the low-battery warning on the display
+static constexpr int BATT_UNKNOWN = -1;	   // battery percent when the ADC read failed
 
 /* Device mode. Measurement only runs in Normal; calibration/reset (later) switch
  * the mode and the button handler drives their flow. */
@@ -31,7 +32,6 @@ enum class Mode : uint8_t
 };
 
 static Mode mode = Mode::Normal;
-static bool display_ok;
 static uint16_t last_co2_ppm;
 static uint32_t tick_count;
 
@@ -41,18 +41,23 @@ static void do_measurement()
 {
 	const bool full_co2 = (tick_count % CO2_EVERY_TICKS) == 0;
 
+	/* Battery: sample every tick (cheap ADC, and the EMA wants that cadence) but only
+	 * stage it on the CO2 tick, so a percent step never forces an e-paper refresh on
+	 * the cheap T+RH ticks. BATT_UNKNOWN is the single encoding of "not read". */
 	BatteryReading b{};
-	const bool batt_ok = (battery::sample(&b) == 0);
-	const uint8_t batt_pct = batt_ok ? b.ext_pct : 100;
-
-	if (full_co2 && batt_ok && display_ok)
+	const int batt_pct = (battery::sample(&b) == 0) ? b.ext_pct : BATT_UNKNOWN;
+	if (full_co2 && batt_pct != BATT_UNKNOWN)
 	{
-		ui::set_battery(batt_pct, b.charging);
+		ui::set_battery((uint8_t)batt_pct, b.charging);
 	}
 
 	Scd41Reading r{};
-	const int rc = full_co2 ? scd41::sample(&r) : scd41::sample_rht(&r);
-	if (rc == 0)
+	if ((full_co2 ? scd41::sample(&r) : scd41::sample_rht(&r)) != 0)
+	{
+		printk("SCD41: %s read failed\n", full_co2 ? "CO2" : "RHT");
+		ui::set_error("SENSOR ERROR", "SCD41 read failed");
+	}
+	else
 	{
 		if (full_co2)
 		{
@@ -67,33 +72,20 @@ static void do_measurement()
 			   full_co2 ? "[CO2]" : "[RHT]", r.co2_ppm,
 			   r.temp_x100 / 100, abs(r.temp_x100 % 100),
 			   r.hum_x100 / 100, r.hum_x100 % 100,
-			   batt_ok ? batt_pct : -1, b.charging ? " CHG" : "");
-		if (display_ok)
+			   batt_pct, b.charging ? " CHG" : "");
+
+		if (batt_pct != BATT_UNKNOWN && batt_pct <= LOW_BATTERY_PCT)
 		{
-			if (batt_ok && batt_pct <= LOW_BATTERY_PCT)
-			{
-				ui::set_low_battery(batt_pct);
-			}
-			else
-			{
-				ui::set_sensor(r.co2_ppm, r.temp_x100, r.hum_x100);
-			}
+			ui::set_low_battery((uint8_t)batt_pct);
 		}
-	}
-	else
-	{
-		printk("SCD41: %s read failed\n", full_co2 ? "CO2" : "RHT");
-		if (display_ok)
+		else
 		{
-			ui::set_error("SENSOR ERROR", "SCD41 read failed");
+			ui::set_sensor(r.co2_ppm, r.temp_x100, r.hum_x100);
 		}
 	}
 
 	/* One panel refresh for the whole cycle (battery + view). */
-	if (display_ok)
-	{
-		ui::refresh();
-	}
+	ui::refresh();
 	tick_count++;
 }
 
@@ -115,7 +107,9 @@ static void measure_work_cb(struct k_work *)
 
 int main(void)
 {
-	display_ok = (ui::init() == 0);
+	/* On failure the whole ui:: API becomes a no-op, so nothing below needs to guard
+	 * its calls; we only report it. */
+	const bool display_ok = (ui::init() == 0);
 
 	printk("AirInk v%s (%s %s) started (display %s)\n",
 		   AIRINK_VERSION, __DATE__, __TIME__, display_ok ? "ok" : "FAILED");
@@ -123,11 +117,8 @@ int main(void)
 	if (scd41::init() < 0)
 	{
 		printk("SCD41 not ready\n");
-		if (display_ok)
-		{
-			ui::set_error("SENSOR ERROR", "SCD41 not found");
-			ui::refresh();
-		}
+		ui::set_error("SENSOR ERROR", "SCD41 not found");
+		ui::refresh();
 		return 0; /* leave the error on screen */
 	}
 	if (battery::init() < 0)

@@ -101,6 +101,11 @@ namespace
 	bool dirty;                    /* a setter changed something since the last refresh */
 	int partials_since_full;
 
+	/* False until init() has built the widgets. Every public entry point returns early
+	 * on it, so a failed display init makes the whole UI a safe no-op and callers do
+	 * not each have to guard their ui:: calls (the widgets would be null). */
+	bool ready;
+
 	/* Skip-refresh dedup (per data source). The last_* sentinels are int, not the
 	 * uint8_t of the API, because they use -1 for "nothing shown yet". */
 	bool have_last_reading;
@@ -443,6 +448,7 @@ int ui::init()
 	build_error(scr);
 	build_lowbat(scr);
 	build_reset(scr);
+	ready = true;
 
 	/* Boot splash: pending_view is VIEW_BOOT and shown is VIEW_NONE, so refresh()
 	 * paints it with a full refresh. */
@@ -452,6 +458,10 @@ int ui::init()
 
 void ui::set_sensor(uint16_t co2_ppm, int32_t temp_x100, uint16_t hum_x100)
 {
+	if (!ready)
+	{
+		return;
+	}
 	pending_view = VIEW_SENSOR;
 
 	/* Dedup on the DISPLAYED value (CO2 exact ppm, T to 0.1 C, RH to whole %) so a
@@ -487,6 +497,10 @@ void ui::set_sensor(uint16_t co2_ppm, int32_t temp_x100, uint16_t hum_x100)
 
 void ui::set_error(const char *title, const char *detail)
 {
+	if (!ready)
+	{
+		return;
+	}
 	pending_view = VIEW_ERROR;
 	if (title)
 	{
@@ -498,6 +512,10 @@ void ui::set_error(const char *title, const char *detail)
 
 void ui::set_low_battery(uint8_t pct)
 {
+	if (!ready)
+	{
+		return;
+	}
 	if (pct > 100)
 	{
 		pct = 100;
@@ -521,6 +539,10 @@ void ui::set_low_battery(uint8_t pct)
 
 void ui::set_reset(uint8_t seconds_left)
 {
+	if (!ready)
+	{
+		return;
+	}
 	pending_view = VIEW_RESET;
 
 	if ((int)seconds_left == last_reset_seconds)
@@ -538,6 +560,10 @@ void ui::set_reset(uint8_t seconds_left)
 
 void ui::set_battery(uint8_t pct, bool charging)
 {
+	if (!ready)
+	{
+		return;
+	}
 	if (pct > 100)
 	{
 		pct = 100;
@@ -572,6 +598,10 @@ void ui::set_battery(uint8_t pct, bool charging)
 
 void ui::set_link(Link state)
 {
+	if (!ready)
+	{
+		return;
+	}
 	if ((int)state == last_link)
 	{
 		return;
@@ -583,6 +613,10 @@ void ui::set_link(Link state)
 
 void ui::refresh()
 {
+	if (!ready)
+	{
+		return;
+	}
 	const bool view_changed = (pending_view != shown_view);
 	if (!dirty && !view_changed)
 	{

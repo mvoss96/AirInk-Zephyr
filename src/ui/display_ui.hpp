@@ -9,6 +9,9 @@
  * (no panel I/O), and set_<view>() also selects the active view. A single
  * refresh() then pushes ONE e-paper refresh for all staged changes — so a
  * measurement cycle costs one refresh, not one per update.
+ *
+ * If init() fails (no display), every function below is a safe no-op — callers
+ * do not need to guard their ui:: calls.
  */
 namespace ui
 {
