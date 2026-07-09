@@ -17,6 +17,21 @@ namespace
 	const struct device *const scd41_dev = DEVICE_DT_GET(DT_NODELABEL(scd41));
 	const struct i2c_dt_spec scd41_bus = I2C_DT_SPEC_GET(DT_NODELABEL(scd41));
 
+	/* Temperature EMA (x100), shared across the full and rht-only reads since both
+	 * measure the same channel. The SCD41 has ~0.05 C noise, which at the 0.1 C we
+	 * display flickers the last digit; a 3/4-old-weight EMA settles it. A separate
+	 * init flag (not a sentinel value) is required because temp_x100 can be negative
+	 * below 0 C -- the first reading seeds it directly rather than from zero. */
+	int32_t temp_ema_x100;
+	bool temp_ema_init;
+
+	int32_t smooth_temp(int32_t t_x100)
+	{
+		temp_ema_x100 = temp_ema_init ? (temp_ema_x100 * 3 + t_x100) / 4 : t_x100;
+		temp_ema_init = true;
+		return temp_ema_x100;
+	}
+
 	/*
 	 * Wake the SCD41 (command 0x36F6). In single-shot mode the driver leaves it
 	 * powered down after init, and attr_set/attr_get do not wake it. NACKed while
@@ -94,7 +109,7 @@ int scd41::sample(Scd41Reading *out)
 	sensor_channel_get(scd41_dev, SENSOR_CHAN_HUMIDITY, &hum);
 
 	out->co2_ppm = (uint16_t)co2.val1;
-	out->temp_x100 = temp.val1 * 100 + temp.val2 / 10000;
+	out->temp_x100 = smooth_temp(temp.val1 * 100 + temp.val2 / 10000);
 	out->hum_x100 = (uint16_t)(hum.val1 * 100 + hum.val2 / 10000);
 	return 0;
 }
@@ -125,7 +140,7 @@ int scd41::sample_rht(Scd41Reading *out)
 	const uint16_t h_raw = ((uint16_t)rd[6] << 8) | rd[7];
 	/* SCD4x: T = -45 + 175*raw/65535 [C], RH = 100*raw/65535 [%]. */
 	out->co2_ppm = 0; /* not measured in rht-only mode */
-	out->temp_x100 = -4500 + (int32_t)(17500LL * t_raw / 65535);
+	out->temp_x100 = smooth_temp(-4500 + (int32_t)(17500LL * t_raw / 65535));
 	out->hum_x100 = (uint16_t)(10000LL * h_raw / 65535);
 
 	const uint8_t pd[2] = {0x36, 0xE0}; /* power_down */

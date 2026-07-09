@@ -13,13 +13,11 @@
  * running continuously (~1 mA idle). We deep-suspend it between measurements and
  * only wake it to emit the periodic log lines — so COM9 sees a burst every
  * TICK_MS, not a continuous stream. */
-static const struct device *const console_dev =
-	DEVICE_DT_GET(DT_CHOSEN(zephyr_console));
+static const struct device *const console_dev = DEVICE_DT_GET(DT_CHOSEN(zephyr_console));
 
 static void console_uart(bool on)
 {
-	pm_device_action_run(console_dev,
-			     on ? PM_DEVICE_ACTION_RESUME : PM_DEVICE_ACTION_SUSPEND);
+	pm_device_action_run(console_dev, on ? PM_DEVICE_ACTION_RESUME : PM_DEVICE_ACTION_SUSPEND);
 }
 
 /* Dual cadence (see docs/power-analysis.md): the CO2 single-shot costs ~70 mAs
@@ -45,7 +43,6 @@ static bool display_ok;
  * cheap T+RH ticks refresh temperature/humidity. */
 static uint16_t last_co2_ppm;
 static uint32_t tick_count;
-static int batt_ema_x10 = -1; /* smoothed battery %, x10 (-1 = uninitialized) */
 
 /* One cycle: battery + SCD41 (full CO2 on every CO2_EVERY_TICKS-th tick, else
  * T+RH-only), then one display refresh. */
@@ -53,19 +50,12 @@ static void do_measurement()
 {
 	const bool full_co2 = (tick_count % CO2_EVERY_TICKS) == 0;
 
-	/* Battery: sample every tick (cheap ADC) and exponentially smooth it -- the
-	 * raw % jitters several points (steep part of the Li-Ion curve). Only push it
-	 * to the status bar on the 5-min CO2 tick so the jitter never forces an
-	 * e-paper refresh on the cheap T+RH ticks. */
+	/* Battery: sample every tick (cheap ADC; battery::sample smooths internally) but
+	 * only push it to the status bar on the 5-min CO2 tick, so a percent step never
+	 * forces an e-paper refresh on the cheap T+RH ticks. */
 	BatteryReading b{};
 	const bool batt_ok = (battery::sample(&b) == 0);
-	if (batt_ok)
-	{
-		batt_ema_x10 = (batt_ema_x10 < 0)
-						   ? b.ext_pct * 10
-						   : (batt_ema_x10 * 3 + b.ext_pct * 10) / 4;
-	}
-	const int batt_pct = (batt_ema_x10 < 0) ? 100 : (batt_ema_x10 + 5) / 10;
+	const int batt_pct = batt_ok ? b.ext_pct : 100;
 
 	if (full_co2 && batt_ok && display_ok)
 	{

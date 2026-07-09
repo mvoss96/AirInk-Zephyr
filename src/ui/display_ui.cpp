@@ -105,8 +105,6 @@ namespace
 	bool have_last_reading;
 	uint16_t last_co2, last_hum;
 	int32_t last_temp_x100;
-	int32_t temp_ema_x100; /* smoothed temperature (see set_sensor) */
-	bool temp_ema_init;
 	int last_batt_pct = -1;
 	int last_link = -1;
 	int last_lowbat_pct = -1;
@@ -454,16 +452,6 @@ int ui::init()
 void ui::set_sensor(uint16_t co2_ppm, int32_t temp_c_x100, uint16_t hum_x100)
 {
 	pending_view = VIEW_SENSOR;
-
-	/* Smooth temperature before displaying it: the SCD41 has ~0.05 C noise, which at
-	 * our 0.1 C display resolution flickers the last digit (24.0 -> 24.1 -> 24.0) and
-	 * would force an e-paper refresh every tick on noise alone. An EMA (3/4 old
-	 * weight) settles it. This is purely a display concern -- nothing upstream
-	 * branches on the smoothed value -- so it lives here next to the quantization. */
-	temp_ema_x100 =
-		temp_ema_init ? (temp_ema_x100 * 3 + temp_c_x100) / 4 : temp_c_x100;
-	temp_ema_init = true;
-	temp_c_x100 = temp_ema_x100;
 
 	/* Dedup on the DISPLAYED value (CO2 exact ppm, T to 0.1 C, RH to whole %) so a
 	 * change below what's shown (e.g. 26.03 -> 26.05 C, or 43.05 -> 43.17 % which
