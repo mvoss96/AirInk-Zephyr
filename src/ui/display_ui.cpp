@@ -554,7 +554,7 @@ void ui::set_reset(uint8_t seconds_left)
 	dirty = true;
 }
 
-void ui::set_battery(uint8_t pct, bool charging)
+void ui::set_battery(uint8_t pct)
 {
 	if (!ready)
 	{
@@ -564,13 +564,33 @@ void ui::set_battery(uint8_t pct, bool charging)
 	{
 		pct = 100;
 	}
-	if ((int)pct == last_batt_pct && (int)charging == last_charging)
+	if ((int)pct == last_batt_pct)
 	{
 		return;
 	}
 
-	/* Fill always shows the level. */
 	lv_obj_set_width(batt_fill, (lv_coord_t)(pct * 20 / 100));
+
+	/* The label is hidden while the bolt is shown; writing it anyway keeps it correct
+	 * for the moment set_charging() reveals it again. */
+	char buf[8]; /* DSEG7 digits, no '%' (the font has no percent glyph). */
+	snprintf(buf, sizeof(buf), "%u", pct);
+	lv_label_set_text(batt_pct_lbl, buf);
+
+	last_batt_pct = pct;
+	dirty = true;
+}
+
+void ui::set_charging(bool charging)
+{
+	if (!ready)
+	{
+		return;
+	}
+	if ((int)charging == last_charging)
+	{
+		return;
+	}
 
 	/* Charging: show the bolt in place of the percentage number. */
 	if (charging)
@@ -580,14 +600,10 @@ void ui::set_battery(uint8_t pct, bool charging)
 	}
 	else
 	{
-		char buf[8]; /* DSEG7 digits, no '%' (the font has no percent glyph). */
-		snprintf(buf, sizeof(buf), "%u", pct);
-		lv_label_set_text(batt_pct_lbl, buf);
 		lv_obj_clear_flag(batt_pct_lbl, LV_OBJ_FLAG_HIDDEN);
 		lv_obj_add_flag(batt_bolt, LV_OBJ_FLAG_HIDDEN);
 	}
 
-	last_batt_pct = pct;
 	last_charging = charging;
 	dirty = true;
 }

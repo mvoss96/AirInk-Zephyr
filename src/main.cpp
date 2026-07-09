@@ -22,7 +22,7 @@ static constexpr int LOW_BATTERY_ENTER_PCT = 5; // battery percent at which the 
 static constexpr int LOW_BATTERY_EXIT_PCT = 8;	// battery percent at which the low-battery latch disengages
 
 static uint16_t last_co2_ppm; // last full CO2 read, held on screen between them
-static uint32_t tick_count;
+static uint32_t tick_count;	  // number of measurement cycles since boot
 static bool low_battery;	  // latched; while set the SCD41 is not read at all
 
 /*
@@ -63,7 +63,8 @@ static void do_measurement()
 			   batt_pct, b.charging ? " CHG" : "");
 		if (batt_pct != BATT_UNKNOWN)
 		{
-			ui::set_battery((uint8_t)batt_pct, b.charging);
+			ui::set_charging(b.charging);
+			ui::set_battery((uint8_t)batt_pct);
 			ui::set_low_battery((uint8_t)batt_pct);
 		}
 		ui::refresh();
@@ -72,10 +73,14 @@ static void do_measurement()
 
 	const bool full_co2 = (tick_count % CO2_EVERY_TICKS) == 0;
 
-	// CO2 tick only: a percent step must not force a refresh on a cheap T+RH tick.
-	if (full_co2 && batt_pct != BATT_UNKNOWN)
+	if (batt_pct != BATT_UNKNOWN)
 	{
-		ui::set_battery((uint8_t)batt_pct, b.charging);
+		ui::set_charging(b.charging); // every tick: the bolt must appear at once
+		if (full_co2)
+		{
+			// CO2 tick only: a percent step must not refresh a cheap T+RH tick.
+			ui::set_battery((uint8_t)batt_pct);
+		}
 	}
 
 	Scd41Reading r{};
