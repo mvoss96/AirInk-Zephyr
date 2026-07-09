@@ -155,12 +155,14 @@ hardware property that firmware can only remove by **gating the rail**, and:
 T+RH ticks) *or* combined with display-refresh quantization (below). A hardware
 lower-quiescent LDO/load-switch is the clean fix but is out of firmware scope.
 
-**Bigger lever than idle:** at the dual-cadence budget (118 mAs/300 s) the **T+RH
-display refreshes cost ~27 mAs — more than idle's ~18 mAs**. Quantizing the shown
-T+RH (e.g. 0.5 °C / 1 %) so the refresh-dedup skips unchanged ticks would save most
-of that *and* open long idle gaps where rail-gating finally pays. That's the higher-
-value next step; it needs on-panel verification (rail cycling + re-init), so it's for
-a supervised session, not an unattended run.
+**Bigger lever than idle — IMPLEMENTED:** at the dual-cadence budget the T+RH
+display refreshes cost more than idle. `set_sensor` now dedups on the *displayed*
+value (CO2 25 ppm / T 0.5 °C / RH 1 %) and the battery is EMA-smoothed + only shown
+on the 5-min CO2 tick, so a T+RH tick only refreshes when the shown value actually
+changes. **Measured: a stable T+RH tick dropped from ~2.96 mAs to ~0.16 mAs (~18×).**
+Battery life (stable air): CO2-5min/T+RH-30s ~135 d (was 106); CO2-10min/T+RH-30s
+**~223 d** (was 151) @ 1000 mAh. Real life sits between the "every tick refreshes"
+and "stable" bounds depending on how often T/RH cross a step.
 
 ## Methodology / what was tested
 
