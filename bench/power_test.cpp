@@ -1,7 +1,13 @@
 /*
- * Power characterization harness (built INSTEAD of main.cpp -- see CMakeLists.txt).
- * Isolates one consumer at a time so each can be measured on the PPK2. Pick the
- * test with TEST_MODE below, rebuild, flash, measure. NOT part of the shipped app.
+ * Power characterization harness. Firmware that REPLACES src/main.cpp so one consumer
+ * at a time can be measured on the PPK2 -- not a test suite; it needs the real board.
+ *
+ *   west build -b promicro_nrf52840/nrf52840 -p -- -DAPP_ENTRY=power_test
+ *
+ * Pick the consumer with TEST_MODE below, rebuild, flash, measure. Results are written
+ * up in docs/power-analysis.md. MODE_IDLE is the mode worth keeping: re-measure the
+ * idle floor whenever a new always-on peripheral (the radio) lands. Note IDLE_RAIL_OFF
+ * -- the GPIO parking order there is load-bearing, see the comment at its use.
  */
 #include <zephyr/kernel.h>
 #include <zephyr/drivers/i2c.h>

@@ -3,11 +3,31 @@ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 
 project(AirInk)
 
+# Which main() to build. A bench harness REPLACES the firmware's main.cpp; it is not a
+# test suite (it needs the real hardware + a PPK2). Select it at configure time:
+#   west build -b promicro_nrf52840/nrf52840 -p -- -DAPP_ENTRY=power_test
+#
+# Read with zephyr_get(), not a plain cache variable: under sysbuild the -D lands in
+# the sysbuild cache, which is exposed to the image as target properties rather than
+# its CMake cache. A `set(APP_ENTRY ... CACHE ...)` would silently keep the default.
+zephyr_get(APP_ENTRY SYSBUILD GLOBAL)
+if(NOT APP_ENTRY)
+	set(APP_ENTRY main)
+endif()
+message(STATUS "AirInk entry point: ${APP_ENTRY}")
+
+if(APP_ENTRY STREQUAL "main")
+	target_sources(app PRIVATE src/main.cpp)
+elseif(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/bench/${APP_ENTRY}.cpp)
+	target_sources(app PRIVATE bench/${APP_ENTRY}.cpp)
+else()
+	message(FATAL_ERROR "APP_ENTRY='${APP_ENTRY}': no such harness bench/${APP_ENTRY}.cpp")
+endif()
+
+# So bench/ resolves "sensors/..." and "ui/..." the way sources inside src/ do.
+target_include_directories(app PRIVATE src)
+
 target_sources(app PRIVATE
-	src/main.cpp
-	# Power/UI test harnesses — swap in (comment src/main.cpp) to use:
-	#   src/partial_test.cpp   # 1 Hz counter, full then partial refresh
-	#   src/power_test.cpp     # per-consumer isolation (SCD41/e-paper/idle), TEST_MODE
 	src/sensors/scd41.cpp
 	src/sensors/battery.cpp
 	src/ui/display_ui.cpp

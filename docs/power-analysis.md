@@ -1,7 +1,7 @@
 # AirInk — Power Analysis
 
 Autonomous measurement campaign on the Nordic PPK2 (source 3.7 V on the battery
-pins) via SWD-flashed isolation firmwares (`src/power_test.cpp`). Each consumer was
+pins) via SWD-flashed isolation firmwares (`bench/power_test.cpp`). Each consumer was
 measured on its own so the numbers are attributable rather than guessed.
 
 > **Caveat on absolute idle:** during the campaign a J-Link was attached to SWD,
@@ -166,9 +166,9 @@ and "stable" bounds depending on how often T/RH cross a step.
 
 ## Methodology / what was tested
 
-Isolation firmwares (`src/power_test.cpp`, `TEST_MODE`), each SWD-flashed and
-measured on the PPK2, analysed from the raw 100 kHz CSV (`scratchpad/analyze.py`,
-range-switch glitches filtered):
+Isolation firmwares (`bench/power_test.cpp`, `TEST_MODE`; build with
+`-DAPP_ENTRY=power_test`), each SWD-flashed and measured on the PPK2, analysed from
+the raw 100 kHz CSV (`scratchpad/analyze.py`, range-switch glitches filtered):
 
 - **SCD41 CO₂** — `scd41::sample()` (full single-shot) in a loop, no display.
 - **SCD41 T+RH-only** — raw `measure_single_shot_rht_only` (0x2196) via I²C.
