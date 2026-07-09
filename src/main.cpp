@@ -56,34 +56,22 @@ static void do_measurement()
 		}
 	}
 
+	if (batt_pct != BATT_UNKNOWN)
+	{
+		ui::set_battery((uint8_t)batt_pct, b.charging);
+	}
+
 	// The battery read above still runs, so charging is noticed within one tick.
 	if (low_battery)
 	{
 		printk("[LOW] batt %d%%%s  measurement suspended\n",
 			   batt_pct, b.charging ? " CHG" : "");
-		if (batt_pct != BATT_UNKNOWN)
-		{
-			ui::set_charging(b.charging);
-			ui::set_battery((uint8_t)batt_pct);
-			ui::set_low_battery((uint8_t)batt_pct);
-		}
+		ui::set_low_battery();
 		ui::refresh();
 		return;
 	}
 
 	const bool full_co2 = (tick_count % CO2_EVERY_TICKS) == 0;
-
-	if (batt_pct != BATT_UNKNOWN)
-	{
-		ui::set_charging(b.charging); // every tick: the bolt must appear at once
-		// Only on the CO2 tick, which refreshes the panel anyway. Staged every tick, a
-		// 1 % step would dirty an otherwise free T+RH tick (~0.16 mAs) and cost it a
-		// full e-paper refresh (~3 mAs).
-		if (full_co2)
-		{
-			ui::set_battery((uint8_t)batt_pct);
-		}
-	}
 
 	Scd41Reading r{};
 	if ((full_co2 ? scd41::sample(&r) : scd41::sample_rht(&r)) != 0)

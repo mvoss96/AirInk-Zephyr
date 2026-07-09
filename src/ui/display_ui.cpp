@@ -506,30 +506,30 @@ void ui::set_error(const char *title, const char *detail)
 	dirty = true;
 }
 
-void ui::set_low_battery(uint8_t pct)
+void ui::set_low_battery()
 {
 	if (!ready)
 	{
 		return;
 	}
-	if (pct > 100)
-	{
-		pct = 100;
-	}
 	pending_view = VIEW_LOWBAT;
 
-	if ((int)pct == last_lowbat_pct)
+	/* Draws the level set_battery() last stored (already clamped). Before the first
+	 * one it is -1, and the label simply stays empty. */
+	if (last_batt_pct == last_lowbat_pct)
 	{
 		return; /* same value already on the widgets */
 	}
 
+	const int pct = (last_batt_pct < 0) ? 0 : last_batt_pct;
+
 	/* Fill the ~122px interior of the big frame proportionally. */
 	lv_obj_set_width(lowbat_fill, (lv_coord_t)(pct * 122 / 100));
 	char buf[8];
-	snprintf(buf, sizeof(buf), "%u", pct);
+	snprintf(buf, sizeof(buf), "%d", pct);
 	lv_label_set_text(lowbat_pct_lbl, buf);
 
-	last_lowbat_pct = pct;
+	last_lowbat_pct = last_batt_pct;
 	dirty = true;
 }
 
@@ -554,7 +554,7 @@ void ui::set_reset(uint8_t seconds_left)
 	dirty = true;
 }
 
-void ui::set_battery(uint8_t pct)
+void ui::set_battery(uint8_t pct, bool charging)
 {
 	if (!ready)
 	{
@@ -564,33 +564,16 @@ void ui::set_battery(uint8_t pct)
 	{
 		pct = 100;
 	}
-	if ((int)pct == last_batt_pct)
+	if ((int)pct == last_batt_pct && (int)charging == last_charging)
 	{
 		return;
 	}
 
 	lv_obj_set_width(batt_fill, (lv_coord_t)(pct * 20 / 100));
 
-	/* The label is hidden while the bolt is shown; writing it anyway keeps it correct
-	 * for the moment set_charging() reveals it again. */
 	char buf[8]; /* DSEG7 digits, no '%' (the font has no percent glyph). */
 	snprintf(buf, sizeof(buf), "%u", pct);
 	lv_label_set_text(batt_pct_lbl, buf);
-
-	last_batt_pct = pct;
-	dirty = true;
-}
-
-void ui::set_charging(bool charging)
-{
-	if (!ready)
-	{
-		return;
-	}
-	if ((int)charging == last_charging)
-	{
-		return;
-	}
 
 	/* Charging: show the bolt in place of the percentage number. */
 	if (charging)
@@ -604,6 +587,7 @@ void ui::set_charging(bool charging)
 		lv_obj_add_flag(batt_bolt, LV_OBJ_FLAG_HIDDEN);
 	}
 
+	last_batt_pct = pct;
 	last_charging = charging;
 	dirty = true;
 }
