@@ -195,10 +195,15 @@
 };
 
 /*
- * Battery sensing on two channels (compare both; pick the primary later):
+ * Battery sensing on two channels:
  *   ch0 = external divider on P0.31 (AIN7): 300k to BAT+, 100k to GND ->
- *         V_pin = V_bat/4, so software scales by 4.
+ *         V_pin = V_bat/4, so software scales by 4. This is the gauge.
  *   ch1 = internal VDDH/5 path (no external parts, no divider drain); scale by 5.
+ *         Read only to detect USB (VDDH sits above BAT+).
+ *
+ * 10 us acquisition is enough: the divider is ~75k of source impedance, inside Nordic's
+ * 100k limit. Raising it to 40 us was measured (bench/batt_seed) and changed the
+ * per-sample scatter not at all -- the scatter is noise, not settling.
  */
 &adc {
 	#address-cells = <1>;
@@ -211,6 +216,7 @@
 		zephyr,acquisition-time = <ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS, 10)>;
 		zephyr,input-positive = <NRF_SAADC_AIN7>;
 		zephyr,resolution = <12>;
+		zephyr,oversampling = <4>;
 	};
 
 	channel@1 {
@@ -220,6 +226,7 @@
 		zephyr,acquisition-time = <ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS, 10)>;
 		zephyr,input-positive = <NRF_SAADC_VDDHDIV5>;
 		zephyr,resolution = <12>;
+		zephyr,oversampling = <4>;
 	};
 };
 

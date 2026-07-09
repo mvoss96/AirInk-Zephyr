@@ -40,7 +40,13 @@ namespace
 		{4200, 100},
 	};
 
-	/* Read one channel and scale the pin millivolts up to cell voltage. */
+	/* Read one channel as cell voltage (pin voltage x `scale`, the divider ratio).
+	 *
+	 * Scale the raw counts BEFORE converting. adc_raw_to_millivolts_dt() truncates to
+	 * whole millivolts at the pin, so converting first and multiplying afterwards
+	 * multiplies that rounding error too: the cell voltage would land on multiples of
+	 * `scale` mV (4 mV here -- two percentage points on the steep part of the Li-Ion
+	 * curve). The conversion is linear, so pre-scaling is exact and costs nothing. */
 	int read_cell_mv(const struct adc_dt_spec &ch, int scale, int32_t *mv_out)
 	{
 		int16_t raw = 0;
@@ -59,14 +65,14 @@ namespace
 			return err;
 		}
 
-		int32_t mv = raw;
+		int32_t mv = (int32_t)raw * scale;
 		err = adc_raw_to_millivolts_dt(&ch, &mv);
 		if (err < 0)
 		{
 			return err;
 		}
 
-		*mv_out = mv * scale;
+		*mv_out = mv;
 		return 0;
 	}
 
