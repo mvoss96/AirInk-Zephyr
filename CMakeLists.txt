@@ -17,7 +17,14 @@ endif()
 message(STATUS "AirInk entry point: ${APP_ENTRY}")
 
 if(APP_ENTRY STREQUAL "main")
-	target_sources(app PRIVATE src/main.cpp)
+	# The button and the menu state machine belong to the firmware's main() only; a
+	# bench harness drives the hardware directly and must not have an input callback
+	# registered behind its back.
+	target_sources(app PRIVATE
+		src/main.cpp
+		src/menu.cpp
+		src/input/button.cpp
+	)
 elseif(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/bench/${APP_ENTRY}.cpp)
 	target_sources(app PRIVATE bench/${APP_ENTRY}.cpp)
 else()

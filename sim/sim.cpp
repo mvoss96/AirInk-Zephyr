@@ -116,6 +116,28 @@ int main()
 	ui::refresh();
 	snapshot("reset");
 
+	// The calibration flow, one snapshot per step the user walks through.
+	g_tick_ms += 100;
+	ui::set_battery(87, false);
+	ui::set_menu(ui::Menu::Calibrate);
+	ui::refresh();
+	snapshot("menu");
+
+	g_tick_ms += 100;
+	ui::set_menu(ui::Menu::Exit); // one tap moves the cursor
+	ui::refresh();
+	snapshot("menu_exit");
+
+	g_tick_ms += 100;
+	ui::set_calib_prompt();
+	ui::refresh();
+	snapshot("calib_prompt");
+
+	g_tick_ms += 100;
+	ui::set_calib_countdown(165);
+	ui::refresh();
+	snapshot("calib_countdown");
+
 	g_tick_ms += 100;
 	ui::set_error("SENSOR ERROR", "SCD41 not responding");
 	ui::refresh();

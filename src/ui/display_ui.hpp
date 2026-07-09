@@ -29,6 +29,17 @@ namespace ui
 		// , Thread…
 	};
 
+	/** Settings-menu entries, in the order they are drawn.
+	 * Units and a factory reset belong here too, but both need a persistent store
+	 * that does not exist yet. A calibration lives inside the sensor, so it needs none.
+	 */
+	enum class Menu : uint8_t
+	{
+		Calibrate,
+		Exit,
+		Count
+	};
+
 	/** Build all widgets and show the boot splash (one full refresh).
 	 *
 	 * @retval 0   the panel is ready and the splash is on screen
@@ -77,6 +88,30 @@ namespace ui
 	 * level last given to set_battery() -- call that first.
 	 */
 	void set_low_battery();
+
+	/** Select the settings menu and stage the highlighted entry.
+	 *
+	 * @param selected the entry to draw in reverse video
+	 */
+	void set_menu(Menu selected);
+
+	/** Select the calibration view: explain the one prerequisite, offer the way out.
+	 *
+	 * Forced recalibration teaches the sensor that the air it currently smells is
+	 * fresh outdoor air. Run indoors it miscalibrates the sensor for good, so this
+	 * screen is the whole safety net -- there is no second confirmation.
+	 */
+	void set_calib_prompt();
+
+	/** Stage the calibration countdown.
+	 *
+	 * The SCD41 runs periodic measurement for these three minutes: the datasheet wants
+	 * it measuring the target air in its normal operating mode before a forced
+	 * recalibration.
+	 *
+	 * @param seconds_left seconds remaining before the recalibration is sent
+	 */
+	void set_calib_countdown(uint16_t seconds_left);
 
 	/** Commit every staged change with a single e-paper refresh.
 	 * Full refresh on a view change and periodically to clear ghosting, partial

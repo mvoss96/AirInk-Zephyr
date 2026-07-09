@@ -34,6 +34,9 @@ namespace
 	constexpr int STATUS_H = 28;
 	constexpr int CONTENT_Y = STATUS_H, CONTENT_W = SCR_W, CONTENT_H = SCR_H - STATUS_H;
 	constexpr int FULL_REFRESH_EVERY = 100;
+	// The entries are centred as a block, so adding one keeps the menu balanced.
+	constexpr int MENU_ITEM_H = 48;
+	constexpr int MENU_TOP = (CONTENT_H - (int)ui::Menu::Count * MENU_ITEM_H) / 2;
 
 	// Status bar (never hidden).
 	lv_obj_t *status_bar;
@@ -85,6 +88,15 @@ namespace
 	lv_obj_t *error_root, *err_title_lbl, *err_detail_lbl;
 	lv_obj_t *lowbat_root, *lowbat_fill, *lowbat_pct_lbl;
 	lv_obj_t *reset_root, *reset_seconds_lbl;
+	lv_obj_t *menu_root, *menu_cursor;
+	lv_obj_t *menu_item[(int)ui::Menu::Count];
+
+	/* The two calibration steps share one set of widgets. They still get one View each,
+	 * so the step change is a view change and thus a full refresh -- the big DSEG7
+	 * digits appearing would ghost badly under a partial one. Within the countdown the
+	 * view does not change, so its ticks stay partial. */
+	lv_obj_t *calib_root, *calib_title, *calib_row;
+	lv_obj_t *calib_value, *calib_unit, *calib_body, *calib_hint;
 
 	/* Views + refresh bookkeeping. Setters stage `pending_view` and dirty the
 	 * widgets; ui::refresh() commits: hide/show the view + ONE panel refresh. */
@@ -95,7 +107,10 @@ namespace
 		VIEW_SENSOR,
 		VIEW_ERROR,
 		VIEW_LOWBAT,
-		VIEW_RESET
+		VIEW_RESET,
+		VIEW_MENU,
+		VIEW_CALIB_PROMPT,
+		VIEW_CALIB_COUNTDOWN
 	};
 	View shown_view = VIEW_NONE;   // what the panel currently shows
 	View pending_view = VIEW_BOOT; // staged by a set_<view>; committed by refresh()
@@ -112,6 +127,8 @@ namespace
 	int last_link = -1;
 	int last_lowbat_pct = -1;
 	int last_reset_seconds = -1;
+	int last_menu_sel = -1;
+	int last_calib_seconds = -1;
 
 	// ---- widget helpers ----
 
@@ -204,6 +221,8 @@ namespace
 		lv_obj_add_flag(error_root, LV_OBJ_FLAG_HIDDEN);
 		lv_obj_add_flag(lowbat_root, LV_OBJ_FLAG_HIDDEN);
 		lv_obj_add_flag(reset_root, LV_OBJ_FLAG_HIDDEN);
+		lv_obj_add_flag(menu_root, LV_OBJ_FLAG_HIDDEN);
+		lv_obj_add_flag(calib_root, LV_OBJ_FLAG_HIDDEN);
 	}
 
 	/** The container that belongs to a view.
@@ -219,6 +238,9 @@ namespace
 		case VIEW_ERROR:  return error_root;
 		case VIEW_LOWBAT: return lowbat_root;
 		case VIEW_RESET:  return reset_root;
+		case VIEW_MENU:   return menu_root;
+		case VIEW_CALIB_PROMPT:
+		case VIEW_CALIB_COUNTDOWN: return calib_root;
 		default:          return boot_root;
 		}
 	}
@@ -461,6 +483,98 @@ namespace
 		lv_obj_align(hint, LV_ALIGN_CENTER, 0, 72);
 	}
 
+	/** Build the settings menu: a header, one label per entry, a moving cursor. */
+	void build_menu(lv_obj_t *scr)
+	{
+		menu_root = make_view(scr);
+
+		lv_obj_t *hdr = make_label(menu_root, &b612_16, CONTENT_W);
+		lv_label_set_text(hdr, "MENU");
+		lv_obj_align(hdr, LV_ALIGN_TOP_MID, 0, 8);
+
+		lv_obj_t *rule = make_divider(menu_root, CONTENT_W - 48, 1);
+		lv_obj_align(rule, LV_ALIGN_TOP_MID, 0, 32);
+
+		// The cursor is created before the labels so they draw on top of it: a
+		// selected entry is white text on the black bar, which is the only way to
+		// mark a selection without a glyph B612's ASCII subset does not have.
+		menu_cursor = make_divider(menu_root, CONTENT_W - 32, MENU_ITEM_H);
+		lv_obj_set_pos(menu_cursor, 16, MENU_TOP);
+
+		static const char *const names[] = {"Calibrate CO2", "Exit"};
+		static_assert(sizeof(names) / sizeof(names[0]) == (size_t)ui::Menu::Count,
+					  "every menu entry needs a label");
+
+		for (int i = 0; i < (int)ui::Menu::Count; i++)
+		{
+			menu_item[i] = make_label(menu_root, &b612_28, CONTENT_W - 32);
+			lv_label_set_text(menu_item[i], names[i]);
+			lv_obj_set_pos(menu_item[i], 16, MENU_TOP + i * MENU_ITEM_H + 7);
+		}
+
+		lv_obj_t *hint = make_label(menu_root, &b612_14, CONTENT_W);
+		lv_label_set_text(hint, "Tap = next     Hold = select");
+		lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -8);
+	}
+
+	/** Build the shared calibration skeleton: title, big value, body, Start/Cancel. */
+	void build_calib(lv_obj_t *scr)
+	{
+		calib_root = make_view(scr);
+
+		calib_title = make_label(calib_root, &b612_28, CONTENT_W);
+		lv_obj_align(calib_title, LV_ALIGN_TOP_MID, 0, 16);
+
+		calib_row = lv_obj_create(calib_root);
+		lv_obj_remove_style_all(calib_row);
+		lv_obj_set_size(calib_row, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+		lv_obj_clear_flag(calib_row, LV_OBJ_FLAG_SCROLLABLE);
+		lv_obj_set_flex_flow(calib_row, LV_FLEX_FLOW_ROW);
+		lv_obj_set_flex_align(calib_row, LV_FLEX_ALIGN_CENTER,
+							  LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
+		lv_obj_set_style_pad_column(calib_row, 5, 0);
+
+		calib_value = make_label(calib_row, &dseg7_48, 0);
+		calib_unit = make_label(calib_row, &b612_28, 0);
+		lv_obj_set_style_translate_y(calib_unit,
+									 (lv_coord_t)(b612_28.base_line - dseg7_48.base_line), 0);
+		lv_obj_align(calib_row, LV_ALIGN_CENTER, 0, -10);
+
+		calib_body = make_label(calib_root, &b612_16, CONTENT_W - 60);
+
+		calib_hint = make_label(calib_root, &b612_14, CONTENT_W);
+		lv_obj_align(calib_hint, LV_ALIGN_BOTTOM_MID, 0, -8);
+	}
+
+	/** Fill the calibration skeleton for one step.
+	 *
+	 * @param title headline
+	 * @param value big DSEG7 digits, or NULL to hide the value row
+	 * @param unit  what the big value counts
+	 * @param body  explanation; sits in the middle when there is no value row
+	 * @param hint  what the button does here
+	 */
+	void calib_fill(const char *title, const char *value, const char *unit,
+					const char *body, const char *hint)
+	{
+		lv_label_set_text(calib_title, title);
+		lv_label_set_text(calib_hint, hint);
+
+		if (value)
+		{
+			lv_label_set_text(calib_value, value);
+			lv_label_set_text(calib_unit, unit);
+			lv_obj_clear_flag(calib_row, LV_OBJ_FLAG_HIDDEN);
+		}
+		else
+		{
+			lv_obj_add_flag(calib_row, LV_OBJ_FLAG_HIDDEN);
+		}
+
+		lv_label_set_text(calib_body, body);
+		lv_obj_align(calib_body, LV_ALIGN_CENTER, 0, value ? 62 : -10);
+	}
+
 } // namespace
 
 int ui::init()
@@ -481,6 +595,8 @@ int ui::init()
 	build_error(scr);
 	build_lowbat(scr);
 	build_reset(scr);
+	build_menu(scr);
+	build_calib(scr);
 	ready = true;
 
 	// Boot splash: pending_view is VIEW_BOOT and shown is VIEW_NONE, so refresh()
@@ -641,6 +757,68 @@ void ui::set_link(Link state)
 	}
 	lv_label_set_text(link_lbl, link_token(state));
 	last_link = (int)state;
+	dirty = true;
+}
+
+void ui::set_menu(Menu selected)
+{
+	if (!ready)
+	{
+		return;
+	}
+	pending_view = VIEW_MENU;
+
+	const int sel = (int)selected;
+	if (sel == last_menu_sel)
+	{
+		return; // same entry already highlighted
+	}
+
+	for (int i = 0; i < (int)Menu::Count; i++)
+	{
+		lv_obj_set_style_text_color(menu_item[i],
+									(i == sel) ? lv_color_white() : lv_color_black(), 0);
+	}
+	lv_obj_set_y(menu_cursor, MENU_TOP + sel * MENU_ITEM_H);
+
+	last_menu_sel = sel;
+	dirty = true;
+}
+
+void ui::set_calib_prompt()
+{
+	if (!ready)
+	{
+		return;
+	}
+	pending_view = VIEW_CALIB_PROMPT;
+	calib_fill("CALIBRATE CO2", nullptr, "",
+			   "Take the device outside, or hold it at a wide open window, "
+			   "and leave it there for three minutes.",
+			   "Hold = start     Tap = cancel");
+	last_calib_seconds = -1; // the countdown has not run yet
+	dirty = true;
+}
+
+void ui::set_calib_countdown(uint16_t seconds_left)
+{
+	if (!ready)
+	{
+		return;
+	}
+	pending_view = VIEW_CALIB_COUNTDOWN;
+
+	if ((int)seconds_left == last_calib_seconds)
+	{
+		return; // same countdown already on the widgets
+	}
+
+	char secs[8];
+	snprintf(secs, sizeof(secs), "%u", seconds_left);
+	calib_fill("CALIBRATING", secs, "s",
+			   "Leave the device in the fresh air.", "Hold to abort");
+
+	last_calib_seconds = seconds_left;
 	dirty = true;
 }
 
