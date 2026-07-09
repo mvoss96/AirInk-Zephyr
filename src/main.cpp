@@ -21,14 +21,6 @@ static constexpr int BATT_UNKNOWN = -1;			// battery percent when the ADC read f
 static constexpr int LOW_BATTERY_ENTER_PCT = 5; // battery percent at which the low-battery latch engages
 static constexpr int LOW_BATTERY_EXIT_PCT = 8;	// battery percent at which the low-battery latch disengages
 
-/* Device mode. Measurement only runs in Normal; calibration/reset (later) switch
- * the mode and the button handler drives their flow. */
-enum class Mode : uint8_t
-{
-	Normal /*, Calibration, Reset */
-};
-
-static Mode mode = Mode::Normal;
 static uint16_t last_co2_ppm; // last full CO2 read, held on screen between them
 static uint32_t tick_count;
 static bool low_battery;	  // latched; while set the SCD41 is not read at all
@@ -116,22 +108,6 @@ static void do_measurement()
 	tick_count++;
 }
 
-/* Periodic measurement: runs on the system work queue and reschedules itself.
- * The single-shot SCD41 fetch blocks ~5 s, which is fine here. */
-static void measure_work_cb(struct k_work *);
-K_WORK_DELAYABLE_DEFINE(measure_work, measure_work_cb);
-
-static void measure_work_cb(struct k_work *)
-{
-	if (mode == Mode::Normal)
-	{
-		console_uart(true);
-		do_measurement();
-		console_uart(false);
-	}
-	k_work_reschedule(&measure_work, K_MSEC(TICK_MS));
-}
-
 int main(void)
 {
 	const bool display_ok = (ui::init() == 0); // on failure the ui:: API is a safe no-op
@@ -151,9 +127,19 @@ int main(void)
 		printk("Battery ADC not ready (continuing without it)\n");
 	}
 
-	// First measurement now, then every TICK_MS. The work callback wakes the console
-	// around each cycle; suspend it here so the interval before the first is quiet.
-	k_work_schedule(&measure_work, K_NO_WAIT);
-	console_uart(false);
-	return 0;
+	/*
+	 * Measurement loop. It runs on main's own stack, not the system work queue: a CO2
+	 * single-shot blocks for ~5 s, and the system queue is shared infrastructure that
+	 * Zephyr subsystems -- the BLE stack, once the radio lands -- also submit to.
+	 *
+	 * The console is woken only around each cycle; between them the UARTE is suspended
+	 * so the HFCLK can stop (that is the difference between ~1 mA and ~60 uA idle).
+	 */
+	while (true)
+	{
+		console_uart(true);
+		do_measurement();
+		console_uart(false);
+		k_sleep(K_MSEC(TICK_MS));
+	}
 }
