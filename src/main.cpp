@@ -54,10 +54,7 @@ static void do_measurement()
 		{
 			low_battery = true;
 		}
-	}
 
-	if (batt_pct != BATT_UNKNOWN)
-	{
 		ui::set_battery((uint8_t)batt_pct, b.charging);
 	}
 
