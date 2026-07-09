@@ -45,19 +45,32 @@ static bool display_ok;
  * cheap T+RH ticks refresh temperature/humidity. */
 static uint16_t last_co2_ppm;
 static uint32_t tick_count;
+static int batt_ema_x10 = -1; /* smoothed battery %, x10 (-1 = uninitialized) */
 
 /* One cycle: battery + SCD41 (full CO2 on every CO2_EVERY_TICKS-th tick, else
  * T+RH-only), then one display refresh. */
 static void do_measurement()
 {
+	const bool full_co2 = (tick_count % CO2_EVERY_TICKS) == 0;
+
+	/* Battery: sample every tick (cheap ADC) and exponentially smooth it -- the
+	 * raw % jitters several points (steep part of the Li-Ion curve). Only push it
+	 * to the status bar on the 5-min CO2 tick so the jitter never forces an
+	 * e-paper refresh on the cheap T+RH ticks. */
 	BatteryReading b{};
 	const bool batt_ok = (battery::sample(&b) == 0);
-	if (batt_ok && display_ok)
+	if (batt_ok)
 	{
-		ui::set_battery((uint8_t)b.ext_pct, b.charging);
+		batt_ema_x10 = (batt_ema_x10 < 0)
+						   ? b.ext_pct * 10
+						   : (batt_ema_x10 * 3 + b.ext_pct * 10) / 4;
 	}
+	const int batt_pct = (batt_ema_x10 < 0) ? 100 : (batt_ema_x10 + 5) / 10;
 
-	const bool full_co2 = (tick_count % CO2_EVERY_TICKS) == 0;
+	if (full_co2 && batt_ok && display_ok)
+	{
+		ui::set_battery((uint8_t)batt_pct, b.charging);
+	}
 
 	Scd41Reading r{};
 	const int rc = full_co2 ? scd41::sample(&r) : scd41::sample_rht(&r);
@@ -75,12 +88,12 @@ static void do_measurement()
 			   full_co2 ? "[CO2]" : "[RHT]", r.co2_ppm,
 			   r.temp_x100 / 100, abs(r.temp_x100 % 100),
 			   r.hum_x100 / 100, r.hum_x100 % 100,
-			   batt_ok ? b.ext_pct : -1, b.charging ? " CHG" : "");
+			   batt_ok ? batt_pct : -1, b.charging ? " CHG" : "");
 		if (display_ok)
 		{
-			if (batt_ok && b.ext_pct <= LOW_BATTERY_PCT)
+			if (batt_ok && batt_pct <= LOW_BATTERY_PCT)
 			{
-				ui::set_low_battery((uint8_t)b.ext_pct);
+				ui::set_low_battery((uint8_t)batt_pct);
 			}
 			else
 			{

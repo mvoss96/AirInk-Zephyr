@@ -453,25 +453,34 @@ void ui::set_sensor(uint16_t co2_ppm, int32_t temp_c_x100, uint16_t hum_x100)
 {
 	pending_view = VIEW_SENSOR;
 
-	if (have_last_reading && co2_ppm == last_co2 &&
-		temp_c_x100 == last_temp_x100 && hum_x100 == last_hum)
+	/* Quantize to the displayed resolution (CO2 25 ppm, T 0.5 C, RH 1 %) and dedup
+	 * on THAT, so a sub-step change (e.g. 26.03 -> 26.05 C) does not force an
+	 * e-paper refresh. On the 30 s T+RH cadence this makes most ticks a no-op
+	 * (~0.1 mAs) instead of a ~3 mAs refresh -- see docs/power-analysis.md. */
+	const uint16_t co2_q = (uint16_t)(((co2_ppm + 12) / 25) * 25);
+	const int32_t temp_q =
+		((temp_c_x100 + (temp_c_x100 >= 0 ? 25 : -25)) / 50) * 50;
+	const uint16_t hum_q = (uint16_t)(((hum_x100 + 50) / 100) * 100);
+
+	if (have_last_reading && co2_q == last_co2 &&
+		temp_q == last_temp_x100 && hum_q == last_hum)
 	{
-		return; /* same values already on the widgets */
+		return; /* same displayed values already on the widgets */
 	}
 
 	char buf[24];
-	snprintf(buf, sizeof(buf), "%u", co2_ppm);
+	snprintf(buf, sizeof(buf), "%u", co2_q);
 	lv_label_set_text(co2_value, buf);
-	snprintf(buf, sizeof(buf), "%u", (unsigned)(hum_x100 / 100));
+	snprintf(buf, sizeof(buf), "%u", (unsigned)(hum_q / 100));
 	lv_label_set_text(hum_value, buf);
-	const int whole = temp_c_x100 / 100;
-	const int frac = abs(temp_c_x100 % 100) / 10;
+	const int whole = temp_q / 100;
+	const int frac = abs(temp_q % 100) / 10;
 	snprintf(buf, sizeof(buf), "%d.%d", whole, frac);
 	lv_label_set_text(temp_value, buf);
 
-	last_co2 = co2_ppm;
-	last_temp_x100 = temp_c_x100;
-	last_hum = hum_x100;
+	last_co2 = co2_q;
+	last_temp_x100 = temp_q;
+	last_hum = hum_q;
 	have_last_reading = true;
 	dirty = true;
 }
