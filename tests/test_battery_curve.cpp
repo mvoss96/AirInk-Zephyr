@@ -1,48 +1,66 @@
-#include "check.hpp"
+#include <doctest.h>
+
 #include "sensors/battery_curve.hpp"
 
 using battery::kCurve;
 using battery::kCurveLen;
-using battery::mv_to_percent;
 
-void test_battery_curve()
+namespace
 {
-	/* Clamped at both ends -- a flat cell and a charger overshoot must not wrap. */
-	CHECK_EQ(mv_to_percent(0), 0);
-	CHECK_EQ(mv_to_percent(3300), 0);
-	CHECK_EQ(mv_to_percent(3299), 0);
-	CHECK_EQ(mv_to_percent(4200), 100);
-	CHECK_EQ(mv_to_percent(5000), 100);
+	/* mv_to_percent returns uint8_t, which doctest would stringify as a character. */
+	int pct(int32_t mv) { return (int)battery::mv_to_percent(mv); }
+} // namespace
 
-	/* Exact on every knot of the curve. */
+TEST_CASE("battery curve: clamps at both ends")
+{
+	/* A flat cell and a charger overshoot must not wrap around. */
+	CHECK(pct(0) == 0);
+	CHECK(pct(3299) == 0);
+	CHECK(pct(3300) == 0);
+	CHECK(pct(4200) == 100);
+	CHECK(pct(5000) == 100);
+}
+
+TEST_CASE("battery curve: exact on every knot")
+{
 	for (size_t i = 0; i < kCurveLen; i++)
 	{
-		CHECK_EQ(mv_to_percent(kCurve[i].mv), kCurve[i].pct);
+		CAPTURE(kCurve[i].mv);
+		REQUIRE(pct(kCurve[i].mv) == (int)kCurve[i].pct);
 	}
+}
 
-	/* Never decreasing, and always a valid percentage. */
+TEST_CASE("battery curve: never decreasing, always a valid percentage")
+{
+	int last = -1;
+	for (int32_t mv = 3200; mv <= 4300; mv++)
 	{
-		int last = -1;
-		for (int32_t mv = 3200; mv <= 4300; mv++)
-		{
-			const int pct = mv_to_percent(mv);
-			CHECK(pct >= last);
-			CHECK(pct >= 0 && pct <= 100);
-			last = pct;
-		}
+		CAPTURE(mv);
+		const int p = pct(mv);
+		REQUIRE(p >= last);
+		REQUIRE(p >= 0);
+		REQUIRE(p <= 100);
+		last = p;
 	}
+}
 
-	/* Interpolates linearly between knots (truncating, so floor). */
-	CHECK_EQ(mv_to_percent(3450), 2); /* midway 3300..3600 -> 2.5 % */
-	CHECK_EQ(mv_to_percent(3640), 7); /* midway 3600..3680 -> 7.5 % */
-	CHECK_EQ(mv_to_percent(3780), 35);
+TEST_CASE("battery curve: interpolates linearly between knots")
+{
+	CHECK(pct(3450) == 2); /* midway 3300..3600 -> 2.5 %, truncated */
+	CHECK(pct(3640) == 7); /* midway 3600..3680 -> 7.5 %, truncated */
+	CHECK(pct(3780) == 35);
+}
 
-	/* The slope the rest of the firmware reasons about: 60 mV per point near empty,
-	 * but only 2 mV per point at 30-40 %. This is why the SAADC noise mattered. */
-	CHECK_EQ(mv_to_percent(3360) - mv_to_percent(3300), 1);
-	CHECK_EQ(mv_to_percent(3772) - mv_to_percent(3770), 1);
+TEST_CASE("battery curve: the slope varies 30-fold across the range")
+{
+	/* 60 mV per percentage point near empty, but only 2 mV per point at 30-40 %. That
+	 * steepness is why the SAADC noise had to be fought at the source. */
+	CHECK(pct(3360) - pct(3300) == 1);
+	CHECK(pct(3772) - pct(3770) == 1);
+}
 
-	/* The low-battery thresholds sit in the flat region, where dither cannot reach. */
-	CHECK_EQ(mv_to_percent(3600), 5); /* LOW_BATTERY_ENTER_PCT */
-	CHECK_EQ(mv_to_percent(3648), 8); /* LOW_BATTERY_EXIT_PCT */
+TEST_CASE("battery curve: the low-battery thresholds sit where dither cannot reach")
+{
+	CHECK(pct(3600) == 5); /* LOW_BATTERY_ENTER_PCT */
+	CHECK(pct(3648) == 8); /* LOW_BATTERY_EXIT_PCT */
 }

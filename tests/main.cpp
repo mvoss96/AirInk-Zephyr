@@ -1,29 +1,11 @@
-#include "check.hpp"
-
-void test_ema();
-void test_battery_curve();
-void test_quantize();
-
-int main()
-{
-	struct
-	{
-		const char *name;
-		void (*run)();
-	} suites[] = {
-		{"ema", test_ema},
-		{"battery_curve", test_battery_curve},
-		{"quantize", test_quantize},
-	};
-
-	/* Any FAIL lines print from inside the suite, just above its own verdict. */
-	for (auto &s : suites)
-	{
-		const int before = g_failures;
-		s.run();
-		std::printf("%-16s %s\n", s.name, (g_failures == before) ? "ok" : "FAILED");
-	}
-
-	std::printf("\n%d checks, %d failures\n", g_checks, g_failures);
-	return (g_failures == 0) ? 0 : 1;
-}
+/*
+ * doctest's entry point, alone in its translation unit so the framework is compiled
+ * once rather than per suite. Everything else in tests/ is TEST_CASEs.
+ *
+ *   ./run.ps1                       run everything
+ *   ./run.ps1 --list-test-cases     what is there
+ *   ./run.ps1 -tc="Ema:*"           run one group
+ *   ./run.ps1 -s                    show successful assertions too
+ */
+#define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
+#include <doctest.h>
