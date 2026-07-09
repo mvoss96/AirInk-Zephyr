@@ -46,6 +46,10 @@ static bool display_ok;
 static uint16_t last_co2_ppm;
 static uint32_t tick_count;
 static int batt_ema_x10 = -1; /* smoothed battery %, x10 (-1 = uninitialized) */
+static int32_t temp_ema_x100;  /* smoothed temperature (x100) */
+static bool temp_ema_init;     /* SCD41 temp has ~0.05 C noise; at 0.1 C display
+								* resolution that flickers the last digit, so smooth
+								* it -- else every tick refreshes on noise alone. */
 
 /* One cycle: battery + SCD41 (full CO2 on every CO2_EVERY_TICKS-th tick, else
  * T+RH-only), then one display refresh. */
@@ -84,6 +88,12 @@ static void do_measurement()
 		{
 			r.co2_ppm = last_co2_ppm; /* keep the last CO2 shown */
 		}
+
+		temp_ema_x100 = temp_ema_init
+							? (temp_ema_x100 * 3 + r.temp_x100) / 4
+							: r.temp_x100;
+		temp_ema_init = true;
+
 		printk("%s CO2 %u ppm  T %d.%02d C  RH %d.%02d %%  batt %d%%%s\n",
 			   full_co2 ? "[CO2]" : "[RHT]", r.co2_ppm,
 			   r.temp_x100 / 100, abs(r.temp_x100 % 100),
@@ -97,7 +107,7 @@ static void do_measurement()
 			}
 			else
 			{
-				ui::set_sensor(r.co2_ppm, r.temp_x100, r.hum_x100);
+				ui::set_sensor(r.co2_ppm, temp_ema_x100, r.hum_x100);
 			}
 		}
 	}
