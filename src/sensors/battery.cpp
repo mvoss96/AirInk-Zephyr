@@ -80,9 +80,6 @@ namespace
 	// reading, and the slow settle costs nothing because the first sample seeds it.
 	Ema<5, 3> ext_mv_ema;
 
-	// The supply rail, not a gauge: no reason to prefer either direction.
-	Ema<4> int_mv_ema;
-
 	uint8_t mv_to_percent(int32_t mv)
 	{
 		if (mv <= kCurve[0].mv)
@@ -139,13 +136,11 @@ int battery::sample(BatteryReading *out)
 	}
 
 	/* Charging is a step event (USB plugged in): detect it on the raw, instantaneous
-	 * voltages so the bolt appears at once instead of after the EMA catches up. */
+	 * voltages so the bolt appears at once instead of after the EMA catches up. This
+	 * is the only use of the internal channel; its voltage goes no further. */
 	out->charging = (int_raw - ext_raw) > CHARGE_DETECT_MV;
 
-	/* Report smoothed voltages (and percentages derived from them). */
 	out->ext_mv = ext_mv_ema.update(ext_raw);
-	out->int_mv = int_mv_ema.update(int_raw);
 	out->ext_pct = mv_to_percent(out->ext_mv);
-	out->int_pct = mv_to_percent(out->int_mv);
 	return 0;
 }

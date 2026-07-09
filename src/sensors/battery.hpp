@@ -2,22 +2,22 @@
 #include <stdint.h>
 
 /*
- * Battery monitor. Two SAADC channels are measured every sample so the two
- * sensing paths can be compared (one becomes the primary later):
- *   ext = external divider on P0.31 (300k BAT+ / 100k GND -> V_bat/4)
- *   int = SoC internal VDDH/5 path (no external parts)
- * Channels come from the devicetree `zephyr,user` io-channels [0]=ext, [1]=int.
+ * Battery monitor. Two SAADC channels from the devicetree `zephyr,user` io-channels:
+ *   [0] ext = external divider on P0.31 (300k BAT+ / 100k GND -> V_bat/4)
+ *   [1] int = SoC internal VDDH/5 path (no external parts)
+ *
+ * The external divider is the gauge. The internal path is read only to compare the
+ * two: on USB, VDDH sits well above the cell, which is how charging is detected. Its
+ * own voltage is of no interest to callers and does not leave the module.
  */
 
-/* Voltages/percentages are EMA-smoothed inside sample() (the SAADC jitters a few
- * mV, which bounces the % on the steep Li-Ion curve); `charging` is instantaneous. */
+/* Voltage/percent are EMA-smoothed inside sample() (the SAADC jitters a few mV, which
+ * bounces the % on the steep Li-Ion curve); `charging` is instantaneous. */
 struct BatteryReading
 {
-	int32_t ext_mv; /* battery voltage via P0.31 divider (BAT+), smoothed */
+	int32_t ext_mv;  /* battery voltage via P0.31 divider (BAT+), smoothed */
 	uint8_t ext_pct; /* 0..100 */
-	int32_t int_mv; /* supply voltage via internal VDDH/5, smoothed */
-	uint8_t int_pct; /* 0..100 */
-	bool charging; /* USB present: VDDH sits well above BAT+ (instantaneous) */
+	bool charging;   /* USB present: VDDH sits well above BAT+ (instantaneous) */
 };
 
 namespace battery
