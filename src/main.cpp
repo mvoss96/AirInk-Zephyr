@@ -76,9 +76,11 @@ static void do_measurement()
 	if (batt_pct != BATT_UNKNOWN)
 	{
 		ui::set_charging(b.charging); // every tick: the bolt must appear at once
+		// Only on the CO2 tick, which refreshes the panel anyway. Staged every tick, a
+		// 1 % step would dirty an otherwise free T+RH tick (~0.16 mAs) and cost it a
+		// full e-paper refresh (~3 mAs).
 		if (full_co2)
 		{
-			// CO2 tick only: a percent step must not refresh a cheap T+RH tick.
 			ui::set_battery((uint8_t)batt_pct);
 		}
 	}
