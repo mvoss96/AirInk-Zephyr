@@ -1,4 +1,5 @@
 #include "battery.hpp"
+#include "../util/ema.hpp"
 
 #include <errno.h>
 #include <zephyr/kernel.h>
@@ -69,19 +70,12 @@ namespace
 		return 0;
 	}
 
-	/* Per-channel EMA of the cell voltage (mV), -1 = uninitialized. The SAADC jitters
-	 * a few mV per read, which on the steep part of the Li-Ion curve bounces the
-	 * percentage by several points; a 3/4-old-weight EMA settles it. We filter the mV
-	 * (the continuous measured quantity) rather than the derived integer % so the
-	 * filter keeps sub-percent resolution -- no need to carry a scaled accumulator. */
-	int32_t ext_mv_ema = -1;
-	int32_t int_mv_ema = -1;
-
-	int32_t smooth(int32_t &ema, int32_t sample)
-	{
-		ema = (ema < 0) ? sample : (ema * 3 + sample) / 4;
-		return ema;
-	}
+	/* Per-channel EMA of the cell voltage (mV). The SAADC jitters a few mV per read,
+	 * which on the steep part of the Li-Ion curve bounces the percentage by several
+	 * points. We filter the mV (the continuous measured quantity) rather than the
+	 * derived integer % so the filter keeps sub-percent resolution. */
+	Ema ext_mv_ema;
+	Ema int_mv_ema;
 
 	uint8_t mv_to_percent(int32_t mv)
 	{
@@ -143,8 +137,8 @@ int battery::sample(BatteryReading *out)
 	out->charging = (int_raw - ext_raw) > CHARGE_DETECT_MV;
 
 	/* Report smoothed voltages (and percentages derived from them). */
-	out->ext_mv = smooth(ext_mv_ema, ext_raw);
-	out->int_mv = smooth(int_mv_ema, int_raw);
+	out->ext_mv = ext_mv_ema.update(ext_raw);
+	out->int_mv = int_mv_ema.update(int_raw);
 	out->ext_pct = mv_to_percent(out->ext_mv);
 	out->int_pct = mv_to_percent(out->int_mv);
 	return 0;

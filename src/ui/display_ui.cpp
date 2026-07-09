@@ -83,7 +83,7 @@ namespace
 	lv_obj_t *sensor_root, *co2_value, *hum_value, *temp_value;
 	lv_obj_t *error_root, *err_title_lbl, *err_detail_lbl;
 	lv_obj_t *lowbat_root, *lowbat_fill, *lowbat_pct_lbl;
-	lv_obj_t *reset_root, *reset_count_lbl;
+	lv_obj_t *reset_root, *reset_seconds_lbl;
 
 	/* Views + refresh bookkeeping. Setters stage `pending_view` and dirty the
 	 * widgets; ui::refresh() commits: hide/show the view + ONE panel refresh. */
@@ -101,14 +101,15 @@ namespace
 	bool dirty;                    /* a setter changed something since the last refresh */
 	int partials_since_full;
 
-	/* Skip-refresh dedup (per data source). */
+	/* Skip-refresh dedup (per data source). The last_* sentinels are int, not the
+	 * uint8_t of the API, because they use -1 for "nothing shown yet". */
 	bool have_last_reading;
-	uint16_t last_co2, last_hum;
+	uint16_t last_co2_ppm, last_hum_x100;
 	int32_t last_temp_x100;
 	int last_batt_pct = -1;
 	int last_link = -1;
 	int last_lowbat_pct = -1;
-	int last_reset_count = -1;
+	int last_reset_seconds = -1;
 
 	/* ---- widget helpers ---- */
 
@@ -195,9 +196,9 @@ namespace
 		}
 	}
 
-	const char *link_token(ui::Link s)
+	const char *link_token(ui::Link state)
 	{
-		switch (s)
+		switch (state)
 		{
 		case ui::Link::BleAdv:
 			return "BLE..";
@@ -413,9 +414,9 @@ namespace
 		lv_obj_align(title, LV_ALIGN_CENTER, 0, -75);
 
 		/* Big DSEG7 countdown (seconds left), matching the sensor values. */
-		reset_count_lbl = make_label(reset_root, &dseg7_48, 0);
-		lv_obj_align(reset_count_lbl, LV_ALIGN_CENTER, 0, 0);
-		lv_label_set_text(reset_count_lbl, "");
+		reset_seconds_lbl = make_label(reset_root, &dseg7_48, 0);
+		lv_obj_align(reset_seconds_lbl, LV_ALIGN_CENTER, 0, 0);
+		lv_label_set_text(reset_seconds_lbl, "");
 
 		lv_obj_t *hint = make_label(reset_root, &b612_16, CONTENT_W);
 		lv_label_set_text(hint, "Release to cancel");
@@ -449,7 +450,7 @@ int ui::init()
 	return 0;
 }
 
-void ui::set_sensor(uint16_t co2_ppm, int32_t temp_c_x100, uint16_t hum_x100)
+void ui::set_sensor(uint16_t co2_ppm, int32_t temp_x100, uint16_t hum_x100)
 {
 	pending_view = VIEW_SENSOR;
 
@@ -458,12 +459,11 @@ void ui::set_sensor(uint16_t co2_ppm, int32_t temp_c_x100, uint16_t hum_x100)
 	 * both show "43") does not force an e-paper refresh. On the 30 s T+RH cadence a
 	 * no-change tick then costs ~0.16 mAs (SCD41 read only) instead of a ~3 mAs
 	 * refresh -- see docs/power-analysis.md. */
-	const int32_t temp_q =
-		((temp_c_x100 + (temp_c_x100 >= 0 ? 5 : -5)) / 10) * 10;
+	const int32_t temp_q = ((temp_x100 + (temp_x100 >= 0 ? 5 : -5)) / 10) * 10;
 	const uint16_t hum_q = (uint16_t)(((hum_x100 + 50) / 100) * 100);
 
-	if (have_last_reading && co2_ppm == last_co2 &&
-		temp_q == last_temp_x100 && hum_q == last_hum)
+	if (have_last_reading && co2_ppm == last_co2_ppm &&
+		temp_q == last_temp_x100 && hum_q == last_hum_x100)
 	{
 		return; /* same displayed values already on the widgets */
 	}
@@ -478,9 +478,9 @@ void ui::set_sensor(uint16_t co2_ppm, int32_t temp_c_x100, uint16_t hum_x100)
 	snprintf(buf, sizeof(buf), "%d.%d", whole, frac);
 	lv_label_set_text(temp_value, buf);
 
-	last_co2 = co2_ppm;
+	last_co2_ppm = co2_ppm;
 	last_temp_x100 = temp_q;
-	last_hum = hum_q;
+	last_hum_x100 = hum_q;
 	have_last_reading = true;
 	dirty = true;
 }
@@ -496,26 +496,26 @@ void ui::set_error(const char *title, const char *detail)
 	dirty = true;
 }
 
-void ui::set_low_battery(uint8_t percent)
+void ui::set_low_battery(uint8_t pct)
 {
-	if (percent > 100)
+	if (pct > 100)
 	{
-		percent = 100;
+		pct = 100;
 	}
 	pending_view = VIEW_LOWBAT;
 
-	if ((int)percent == last_lowbat_pct)
+	if ((int)pct == last_lowbat_pct)
 	{
 		return; /* same value already on the widgets */
 	}
 
 	/* Fill the ~122px interior of the big frame proportionally. */
-	lv_obj_set_width(lowbat_fill, (lv_coord_t)(percent * 122 / 100));
+	lv_obj_set_width(lowbat_fill, (lv_coord_t)(pct * 122 / 100));
 	char buf[8];
-	snprintf(buf, sizeof(buf), "%u", percent);
+	snprintf(buf, sizeof(buf), "%u", pct);
 	lv_label_set_text(lowbat_pct_lbl, buf);
 
-	last_lowbat_pct = percent;
+	last_lowbat_pct = pct;
 	dirty = true;
 }
 
@@ -523,32 +523,32 @@ void ui::set_reset(uint8_t seconds_left)
 {
 	pending_view = VIEW_RESET;
 
-	if ((int)seconds_left == last_reset_count)
+	if ((int)seconds_left == last_reset_seconds)
 	{
 		return; /* same value already on the widgets */
 	}
 
 	char buf[8];
 	snprintf(buf, sizeof(buf), "%u", seconds_left);
-	lv_label_set_text(reset_count_lbl, buf);
+	lv_label_set_text(reset_seconds_lbl, buf);
 
-	last_reset_count = seconds_left;
+	last_reset_seconds = seconds_left;
 	dirty = true;
 }
 
-void ui::set_battery(uint8_t percent, bool charging)
+void ui::set_battery(uint8_t pct, bool charging)
 {
-	if (percent > 100)
+	if (pct > 100)
 	{
-		percent = 100;
+		pct = 100;
 	}
-	if ((int)percent == last_batt_pct && (int)charging == last_charging)
+	if ((int)pct == last_batt_pct && (int)charging == last_charging)
 	{
 		return;
 	}
 
 	/* Fill always shows the level. */
-	lv_obj_set_width(batt_fill, (lv_coord_t)(percent * 20 / 100));
+	lv_obj_set_width(batt_fill, (lv_coord_t)(pct * 20 / 100));
 
 	/* Charging: show the bolt in place of the percentage number. */
 	if (charging)
@@ -559,13 +559,13 @@ void ui::set_battery(uint8_t percent, bool charging)
 	else
 	{
 		char buf[8]; /* DSEG7 digits, no '%' (the font has no percent glyph). */
-		snprintf(buf, sizeof(buf), "%u", percent);
+		snprintf(buf, sizeof(buf), "%u", pct);
 		lv_label_set_text(batt_pct_lbl, buf);
 		lv_obj_clear_flag(batt_pct_lbl, LV_OBJ_FLAG_HIDDEN);
 		lv_obj_add_flag(batt_bolt, LV_OBJ_FLAG_HIDDEN);
 	}
 
-	last_batt_pct = percent;
+	last_batt_pct = pct;
 	last_charging = charging;
 	dirty = true;
 }

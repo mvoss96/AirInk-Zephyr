@@ -73,7 +73,7 @@ int main()
 		return 1;
 	}
 	/* Every frame: stage the changes, then one refresh() commits (as on device). */
-	ui::set_battery(87, /*charging=*/true); /* boot: show the charging bolt */
+	ui::set_battery(87, true); /* boot: show the charging bolt */
 	ui::set_link(ui::Link::BleConnected);
 	ui::refresh();
 	snapshot("boot");
