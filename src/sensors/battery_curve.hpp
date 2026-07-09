@@ -4,7 +4,7 @@
 
 /*
  * Open-circuit voltage -> state of charge for a typical single-cell Li-Ion, piecewise
- * linearized. Free of Zephyr so it can be exercised on the host (tests/).
+ * linearized. Kept free of Zephyr: it is a lookup table, not a driver.
  *
  * Note how uneven the slope is: 60 mV per percentage point near empty, but only 2 mV
  * per point around 30-40 %. That steepness is why the SAADC noise had to be fought at

@@ -7,12 +7,6 @@
             "forcedInclude": [
                 "${workspaceFolder}/build/AirInk/zephyr/include/generated/zephyr/autoconf.h"
             ],
-            // Fallback for translation units absent from compile_commands.json -- the
-            // host tests in tests/, which are built by tests/run.ps1, not by west.
-            "includePath": [
-                "${workspaceFolder}/src",
-                "${workspaceFolder}/tests/third_party"
-            ],
             "cStandard": "c11",
             "cppStandard": "c++17",
             "intelliSenseMode": "windows-gcc-arm"
