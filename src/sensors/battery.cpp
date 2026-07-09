@@ -71,10 +71,17 @@ namespace
 	}
 
 	// Filter the mV, not the derived integer % -- the continuous quantity keeps the
-	// filter's sub-percent resolution. SAADC jitter of a few mV bounces the percent
-	// by several points on the steep part of the Li-Ion curve.
-	Ema ext_mv_ema;
-	Ema int_mv_ema;
+	// filter's sub-percent resolution. SAADC jitter of a few mV bounces the percent by
+	// several points on the steep part of the Li-Ion curve.
+	//
+	// The battery gauge falls ~4x more readily than it rises: a cell that reads low is
+	// merely pessimistic (~0.25 pp at the steepest point), one that reads high strands
+	// the user. Nothing needs tracking quickly -- charging is detected on the raw
+	// reading, and the slow settle costs nothing because the first sample seeds it.
+	Ema<5, 3> ext_mv_ema;
+
+	// The supply rail, not a gauge: no reason to prefer either direction.
+	Ema<4> int_mv_ema;
 
 	uint8_t mv_to_percent(int32_t mv)
 	{
