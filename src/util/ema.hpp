@@ -1,11 +1,9 @@
 #pragma once
 #include <stdint.h>
 
-/*
- * Exponential moving average for noisy integer sensor readings.
- *
+/** Exponential moving average for noisy integer sensor readings.
  * Each sample pulls the average 1/2^Shift of the way toward the new reading, so a
- * bigger Shift is a calmer, slower filter: 1 keeps 1/2 of the average, 2 keeps 3/4,
+ * bigger shift is a calmer, slower filter: 1 keeps 1/2 of the average, 2 keeps 3/4,
  * 5 keeps 31/32.
  *
  * Rise and fall may use different shifts. A battery gauge should follow a falling cell
@@ -20,6 +18,9 @@
  * Statics are zero-initialized and so start unseeded: the first update() adopts the
  * reading rather than dragging it up from zero. That is a flag, not a sentinel value,
  * because readings may legitimately be negative (sub-zero temperatures).
+ *
+ * @tparam RiseShift weight when the reading is above the average, 1..8
+ * @tparam FallShift weight when it is below; defaults to RiseShift (symmetric)
  */
 template <uint8_t RiseShift, uint8_t FallShift = RiseShift>
 struct Ema
@@ -27,16 +28,25 @@ struct Ema
 	static_assert(RiseShift >= 1 && RiseShift <= 8, "RiseShift outside the useful range");
 	static_assert(FallShift >= 1 && FallShift <= 8, "FallShift outside the useful range");
 
-	/* Enough fractional bits for the slower of the two directions. */
+	// Enough fractional bits for the slower of the two directions.
 	static constexpr uint8_t Frac = (RiseShift > FallShift) ? RiseShift : FallShift;
 	static constexpr int32_t One = 1 << Frac;
 
-	int32_t state; /* the average, in units of 1/One */
+	int32_t state; // the average, in units of 1/One
 	bool seeded;
 
-	/* Arithmetic (floor) shift, so this rounds the same way for negative readings. */
+	/** The current average, without the fractional bits.
+	 *
+	 * @return the smoothed value; an arithmetic (floor) shift, so it rounds the
+	 *         same way for negative readings
+	 */
 	int32_t value() const { return state >> Frac; }
 
+	/** Fold one reading into the average.
+	 *
+	 * @param raw the new measurement, in the same unit as every other reading
+	 * @return the updated average; on the very first call, `raw` itself (the seed)
+	 */
 	int32_t update(int32_t raw)
 	{
 		if (!seeded)
@@ -49,9 +59,9 @@ struct Ema
 		const int32_t gap = raw - value();
 		const uint8_t shift = (gap > 0) ? RiseShift : FallShift;
 
-		/* Multiply rather than shift: gap is signed, and a negative left shift is
-		 * undefined before C++20. (One >> shift) is 2^(Frac - shift), never 0, which
-		 * is what keeps a one-unit gap from stalling. */
+		// Multiply rather than shift: gap is signed, and a negative left shift is
+		// undefined before C++20. (One >> shift) is 2^(Frac - shift), never 0, which
+		// is what keeps a one-unit gap from stalling.
 		state += gap * (One >> shift);
 		return value();
 	}

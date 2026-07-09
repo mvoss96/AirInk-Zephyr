@@ -8,8 +8,7 @@
 
 namespace
 {
-
-	/* [0] = external divider (P0.31, x4), [1] = internal VDDH/5 (x5). */
+	// [0] = external divider (P0.31, x4), [1] = internal VDDH/5 (x5).
 	const struct adc_dt_spec ch_ext = ADC_DT_SPEC_GET_BY_IDX(DT_PATH(zephyr_user), 0);
 	const struct adc_dt_spec ch_int = ADC_DT_SPEC_GET_BY_IDX(DT_PATH(zephyr_user), 1);
 
@@ -18,13 +17,19 @@ namespace
 	 * the ~4.8 V USB rail, hundreds of mV above the cell. */
 	constexpr int32_t CHARGE_DETECT_MV = 300;
 
-	/* Read one channel as cell voltage (pin voltage x `scale`, the divider ratio).
-	 *
+	/** Read one channel as a cell voltage: pin voltage x the divider ratio.
 	 * Scale the raw counts BEFORE converting. adc_raw_to_millivolts_dt() truncates to
 	 * whole millivolts at the pin, so converting first and multiplying afterwards
 	 * multiplies that rounding error too: the cell voltage would land on multiples of
 	 * `scale` mV (4 mV here -- two percentage points on the steep part of the Li-Ion
-	 * curve). The conversion is linear, so pre-scaling is exact and costs nothing. */
+	 * curve). The conversion is linear, so pre-scaling is exact and costs nothing.
+	 *
+	 * @param      ch     the configured ADC channel to sample
+	 * @param      scale  divider ratio: 4 for the external divider, 5 for VDDH/5
+	 * @param[out] mv_out receives the cell voltage in millivolts
+	 * @retval 0      on success
+	 * @retval -errno the conversion failed; *mv_out is left untouched
+	 */
 	int read_cell_mv(const struct adc_dt_spec &ch, int scale, int32_t *mv_out)
 	{
 		int16_t raw = 0;
@@ -95,9 +100,9 @@ int battery::sample(BatteryReading *out)
 		return -EIO;
 	}
 
-	/* Charging is a step event (USB plugged in): detect it on the raw, instantaneous
-	 * voltages so the bolt appears at once instead of after the EMA catches up. This
-	 * is the only use of the internal channel; its voltage goes no further. */
+	// Charging is a step event (USB plugged in): detect it on the raw, instantaneous
+	// voltages so the bolt appears at once instead of after the EMA catches up. This
+	// is the only use of the internal channel; its voltage goes no further.
 	out->charging = (int_raw - ext_raw) > CHARGE_DETECT_MV;
 
 	out->bat_mv = ext_mv_ema.update(ext_raw);

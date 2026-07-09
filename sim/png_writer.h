@@ -1,4 +1,4 @@
-/*
+/** @file
  * Minimal, dependency-free 8-bit grayscale PNG encoder for the host preview.
  *
  * Kept as a standalone unit on purpose: the only reason the sim writes PNG (and
@@ -17,7 +17,15 @@
 #include <cstring>
 #include <cstdlib>
 
-/* CRC-32 over the concatenation a[na] || b[nb] (PNG chunks CRC type||data). */
+/** CRC-32 over the concatenation a || b.
+ * PNG chunks CRC their type followed by their data, hence the two parts.
+ *
+ * @param a  first buffer (the chunk type)
+ * @param na its length
+ * @param b  second buffer (the chunk data), may be NULL when nb is 0
+ * @param nb its length
+ * @return the CRC-32 of a followed by b
+ */
 static uint32_t pngw_crc32(const uint8_t *a, size_t na, const uint8_t *b, size_t nb)
 {
 	uint32_t c = 0xFFFFFFFFu;
@@ -35,6 +43,11 @@ static uint32_t pngw_crc32(const uint8_t *a, size_t na, const uint8_t *b, size_t
 	return ~c;
 }
 
+/** Write a 32-bit big-endian value, as every PNG length and CRC field is.
+ *
+ * @param f open output stream
+ * @param v the value
+ */
 static void pngw_put32(FILE *f, uint32_t v)
 {
 	uint8_t b[4] = {(uint8_t)(v >> 24), (uint8_t)(v >> 16),
@@ -42,6 +55,13 @@ static void pngw_put32(FILE *f, uint32_t v)
 	fwrite(b, 1, 4, f);
 }
 
+/** Write one PNG chunk: length, type, data, CRC.
+ *
+ * @param f    open output stream
+ * @param type four-character chunk type, e.g. "IHDR"
+ * @param data payload, may be NULL when len is 0
+ * @param len  payload length in bytes
+ */
 static void pngw_chunk(FILE *f, const char *type, const uint8_t *data, size_t len)
 {
 	pngw_put32(f, (uint32_t)len);
@@ -51,7 +71,15 @@ static void pngw_chunk(FILE *f, const char *type, const uint8_t *data, size_t le
 	pngw_put32(f, pngw_crc32((const uint8_t *)type, 4, data, len));
 }
 
-/* Write `gray` (w*h bytes, row-major, 0=black..255=white) as a grayscale PNG. */
+/** Write a grayscale bitmap as an 8-bit PNG.
+ *
+ * @param path output file, overwritten if it exists
+ * @param gray w*h bytes, row-major, 0=black..255=white
+ * @param w    width in pixels
+ * @param h    height in pixels
+ * @retval 0  the file was written
+ * @retval -1 the file could not be opened
+ */
 static int write_gray_png(const char *path, const uint8_t *gray, int w, int h)
 {
 	FILE *f = fopen(path, "wb");
@@ -64,11 +92,11 @@ static int write_gray_png(const char *path, const uint8_t *gray, int w, int h)
 	uint8_t ihdr[13] = {
 		(uint8_t)(w >> 24), (uint8_t)(w >> 16), (uint8_t)(w >> 8), (uint8_t)w,
 		(uint8_t)(h >> 24), (uint8_t)(h >> 16), (uint8_t)(h >> 8), (uint8_t)h,
-		8, 0, 0, 0, 0 /* 8-bit grayscale */
+		8, 0, 0, 0, 0 // 8-bit grayscale
 	};
 	pngw_chunk(f, "IHDR", ihdr, sizeof(ihdr));
 
-	/* raw = per row: filter byte 0 + w pixels */
+	// raw = per row: filter byte 0 + w pixels
 	size_t raw_len = (size_t)h * (1 + (size_t)w);
 	uint8_t *raw = (uint8_t *)malloc(raw_len);
 	for (int y = 0, o = 0; y < h; y++)
@@ -78,7 +106,7 @@ static int write_gray_png(const char *path, const uint8_t *gray, int w, int h)
 		o += w;
 	}
 
-	/* zlib stream: header + DEFLATE stored blocks + Adler-32 */
+	// zlib stream: header + DEFLATE stored blocks + Adler-32
 	size_t nblk = (raw_len + 65534) / 65535;
 	if (!nblk)
 		nblk = 1;
@@ -119,4 +147,4 @@ static int write_gray_png(const char *path, const uint8_t *gray, int w, int h)
 	return 0;
 }
 
-#endif /* PNG_WRITER_H */
+#endif // PNG_WRITER_H

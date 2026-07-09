@@ -1,9 +1,11 @@
 #pragma once
 #include <stdint.h>
 
-/*
- * LVGL UI for the AirInk 4.2" 400x300 e-paper. A persistent status bar (battery
- * + link) sits on top; below it one content view is shown at a time.
+/** @file
+ * LVGL UI for the AirInk 4.2" 400x300 e-paper.
+ *
+ * A persistent status bar (battery + link) sits on top; below it one content view
+ * is shown at a time.
  *
  * The API is staging + commit: every set_*() just updates the retained widgets
  * (no panel I/O), and set_<view>() also selects the active view. A single
@@ -16,7 +18,7 @@
 namespace ui
 {
 
-	/* Connectivity shown in the status bar. */
+	// Connectivity shown in the status bar.
 	enum class Link
 	{
 		None,
@@ -24,27 +26,62 @@ namespace ui
 		BleConnected,
 		ZigbeeJoining,
 		ZigbeeConnected
-		/* , Thread… */
+		// , Thread…
 	};
 
-	/* Build all widgets, show the boot splash (one full refresh). 0 on success. */
+	/** Build all widgets and show the boot splash (one full refresh).
+	 *
+	 * @retval 0   the panel is ready and the splash is on screen
+	 * @retval -1  no display; every other function here becomes a no-op
+	 */
 	int init();
 
-	/* Status-bar data (visible on every view). Stage only — call refresh() to show. */
+	/** Stage the battery indicator, shown on every view.
+	 *
+	 * @param pct      state of charge, 0..100 (clamped)
+	 * @param charging true to show the bolt instead of the number
+	 */
 	void set_battery(uint8_t pct, bool charging);
+
+	/** Stage the connectivity token, shown on every view.
+	 *
+	 * @param state radio state; ui::Link::None draws "--"
+	 */
 	void set_link(Link state);
 
-	/* Select the active content view + its data. Stage only — call refresh(). */
+	/** Select the sensor view and stage its three readings.
+	 * Values are deduped at display resolution, so a change too small to be shown
+	 * costs no e-paper refresh.
+	 *
+	 * @param co2_ppm   CO2 concentration in ppm
+	 * @param temp_x100 temperature in hundredths of a degree Celsius (may be negative)
+	 * @param hum_x100  relative humidity in hundredths of a percent
+	 */
 	void set_sensor(uint16_t co2_ppm, int32_t temp_x100, uint16_t hum_x100);
-	void set_error(const char *title, const char *detail);
-	void set_reset(uint8_t seconds_left); /* factory-reset countdown */
 
-	/* Low-battery warning. It is another view of the same battery as the status bar,
-	 * so it draws the level last given to set_battery() — call that first. */
+	/** Select the error view and stage its text.
+	 *
+	 * @param title  headline, e.g. "SENSOR ERROR"; NULL keeps the previous one
+	 * @param detail second line; NULL clears it
+	 */
+	void set_error(const char *title, const char *detail);
+
+	/** Select the factory-reset view and stage the countdown.
+	 *
+	 * @param seconds_left seconds remaining before the reset fires
+	 */
+	void set_reset(uint8_t seconds_left);
+
+	/** Select the low-battery warning view.
+	 * It is another view of the same battery as the status bar, so it draws the
+	 * level last given to set_battery() -- call that first.
+	 */
 	void set_low_battery();
 
-	/* Commit staged changes with a single refresh (full on a view change or
-	 * periodically to clear ghosting; partial otherwise; no-op if unchanged). */
+	/** Commit every staged change with a single e-paper refresh.
+	 * Full refresh on a view change and periodically to clear ghosting, partial
+	 * otherwise. Does nothing if no setter changed anything.
+	 */
 	void refresh();
 
 } // namespace ui

@@ -10,6 +10,12 @@
 #include "version.hpp"
 
 static const struct device *const console_dev = DEVICE_DT_GET(DT_CHOSEN(zephyr_console));
+
+/** Resume or suspend the console UART.
+ *
+ * @param on true before printing, false afterwards -- a suspended UARTE lets the
+ *           HFCLK stop, which is the difference between ~1 mA and ~60 uA idle
+ */
 static void console_uart(bool on)
 {
 	pm_device_action_run(console_dev, on ? PM_DEVICE_ACTION_RESUME : PM_DEVICE_ACTION_SUSPEND);
@@ -25,9 +31,9 @@ static uint16_t last_co2_ppm; // last full CO2 read, held on screen between them
 static uint32_t tick_count;	  // number of measurement cycles since boot
 static bool low_battery;	  // latched; while set the SCD41 is not read at all
 
-/*
- * One cycle: battery, then -- unless the battery is low -- the SCD41 (full CO2 on
- * every CO2_EVERY_TICKS-th tick, else T+RH-only), then one display refresh.
+/** Run one measurement cycle and refresh the panel once.
+ * Battery first, then -- unless the battery is low -- the SCD41 (full CO2 on every
+ * CO2_EVERY_TICKS-th tick, else T+RH-only), then one display refresh.
  *
  * The low-battery latch uses hysteresis rather than a plain threshold: the smoothed
  * percent drifts across a single boundary, and each flap would be a view change, i.e.
@@ -99,6 +105,11 @@ static void do_measurement()
 	tick_count++;
 }
 
+/** Bring up the display and sensors, then loop over measurement cycles.
+ *
+ * @return 0 when a fatal sensor error leaves its message on the panel; otherwise
+ *         never returns
+ */
 int main(void)
 {
 	const bool display_ok = (ui::init() == 0);
@@ -118,14 +129,12 @@ int main(void)
 		printk("Battery ADC not ready (continuing without it)\n");
 	}
 
-	/*
-	 * Measurement loop. It runs on main's own stack, not the system work queue: a CO2
-	 * single-shot blocks for ~5 s, and the system queue is shared infrastructure that
-	 * Zephyr subsystems -- the BLE stack, once the radio lands -- also submit to.
-	 *
-	 * The console is woken only around each cycle; between them the UARTE is suspended
-	 * so the HFCLK can stop (that is the difference between ~1 mA and ~60 uA idle).
-	 */
+	// Measurement loop. It runs on main's own stack, not the system work queue: a CO2
+	// single-shot blocks for ~5 s, and the system queue is shared infrastructure that
+	// Zephyr subsystems -- the BLE stack, once the radio lands -- also submit to.
+	//
+	// The console is woken only around each cycle; between them the UARTE is suspended
+	// so the HFCLK can stop (that is the difference between ~1 mA and ~60 uA idle).
 	while (true)
 	{
 		console_uart(true);

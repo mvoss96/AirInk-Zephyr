@@ -11,10 +11,10 @@
 #ifndef LV_CONF_H
 #define LV_CONF_H
 
-/* 8-bit grayscale render target (L8). Layout is independent of colour depth. */
+// 8-bit grayscale render target (L8). Layout is independent of colour depth.
 #define LV_COLOR_DEPTH 8
 
-/* Roomy heap on the host so 48px rasterisation never runs dry. */
+// Roomy heap on the host so 48px rasterisation never runs dry.
 #define LV_USE_STDLIB_MALLOC LV_STDLIB_BUILTIN
 #define LV_USE_STDLIB_STRING LV_STDLIB_BUILTIN
 #define LV_USE_STDLIB_SPRINTF LV_STDLIB_BUILTIN
@@ -22,12 +22,12 @@
 
 #define LV_USE_OS LV_OS_NONE
 
-/* No logging / asserts noise for the one-shot render. */
+// No logging / asserts noise for the one-shot render.
 #define LV_USE_LOG 0
 
-/* UI fonts are custom (B612/DSEG7 from sim/fonts/); only need a built-in default
- * font, which is never shown. Tiny UNSCII-8, matching prj.conf. */
+// UI fonts are custom (B612/DSEG7 from sim/fonts/); only need a built-in default
+// font, which is never shown. Tiny UNSCII-8, matching prj.conf.
 #define LV_FONT_UNSCII_8 1
 #define LV_FONT_DEFAULT &lv_font_unscii_8
 
-#endif /* LV_CONF_H */
+#endif // LV_CONF_H

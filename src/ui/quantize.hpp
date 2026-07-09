@@ -11,13 +11,22 @@
  */
 namespace ui
 {
-	/* To 0.1 C. Ties round away from zero: -0.25 C -> -0.3, +0.25 C -> +0.3. */
+	/** Round a temperature to the 0.1 C the panel shows.
+	 * Ties round away from zero: -0.25 C -> -0.3, +0.25 C -> +0.3.
+	 *
+	 * @param temp_x100 temperature in hundredths of a degree (may be negative)
+	 * @return the same value snapped to a multiple of 10 (i.e. 0.1 C)
+	 */
 	inline int32_t quantize_temp_x100(int32_t temp_x100)
 	{
 		return ((temp_x100 + (temp_x100 >= 0 ? 5 : -5)) / 10) * 10;
 	}
 
-	/* To whole percent. Relative humidity is never negative. */
+	/** Round a humidity to the whole percent the panel shows.
+	 *
+	 * @param hum_x100 relative humidity in hundredths of a percent (never negative)
+	 * @return the same value snapped to a multiple of 100 (i.e. 1 %)
+	 */
 	inline uint16_t quantize_hum_x100(uint16_t hum_x100)
 	{
 		return (uint16_t)(((hum_x100 + 50) / 100) * 100);

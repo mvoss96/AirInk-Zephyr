@@ -2,13 +2,8 @@
 #include <stdint.h>
 #include <stddef.h>
 
-/*
- * Open-circuit voltage -> state of charge for a typical single-cell Li-Ion, piecewise
- * linearized. Kept free of Zephyr: it is a lookup table, not a driver.
- *
- * Note how uneven the slope is: 60 mV per percentage point near empty, but only 2 mV
- * per point around 30-40 %. That steepness is why the SAADC noise had to be fought at
- * the source rather than smoothed afterwards -- see battery.cpp.
+/* Open-circuit voltage -> state of charge for a typical single-cell Li-Ion, piecewise
+ * linearized.
  */
 namespace battery
 {
@@ -34,7 +29,11 @@ namespace battery
 	};
 	inline constexpr size_t kCurveLen = sizeof(kCurve) / sizeof(kCurve[0]);
 
-	/* Cell millivolts -> 0..100 %. Clamped at both ends. */
+	/** Map a cell voltage to a state of charge by linear interpolation.
+	 *
+	 * @param mv open-circuit cell voltage in millivolts
+	 * @return 0..100 %, clamped at both ends of the curve
+	 */
 	inline uint8_t mv_to_percent(int32_t mv)
 	{
 		if (mv <= kCurve[0].mv)
@@ -52,7 +51,7 @@ namespace battery
 			{
 				const CurvePoint lo = kCurve[i - 1];
 				const CurvePoint hi = kCurve[i];
-				/* Interpolate in int: the mV deltas overflow a uint8_t. */
+				// Interpolate in int: the mV deltas overflow a uint8_t.
 				const int pct = lo.pct + (int)((mv - lo.mv) * (hi.pct - lo.pct) / (hi.mv - lo.mv));
 				return (uint8_t)pct;
 			}

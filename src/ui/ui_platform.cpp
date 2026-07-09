@@ -1,4 +1,6 @@
-/* Zephyr implementation of the UI platform seam (see ui_platform.hpp). */
+/** @file
+ * Zephyr implementation of the UI platform seam (contract: ui_platform.hpp).
+ */
 #include "ui_platform.hpp"
 
 #include <zephyr/kernel.h>
