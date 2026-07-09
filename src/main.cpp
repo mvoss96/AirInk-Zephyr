@@ -61,8 +61,7 @@ static void do_measurement()
 	// The battery read above still runs, so charging is noticed within one tick.
 	if (low_battery)
 	{
-		printk("[LOW] batt %d%%%s  measurement suspended\n",
-			   batt_pct, b.charging ? " CHG" : "");
+		printk("[LOW] batt %d%%%s  measurement suspended\n", batt_pct, b.charging ? " CHG" : "");
 		ui::set_low_battery();
 		ui::refresh();
 		return;
@@ -102,7 +101,7 @@ static void do_measurement()
 
 int main(void)
 {
-	const bool display_ok = (ui::init() == 0); // on failure the ui:: API is a safe no-op
+	const bool display_ok = (ui::init() == 0);
 
 	printk("AirInk v%s (%s %s) started (display %s)\n",
 		   AIRINK_VERSION, __DATE__, __TIME__, display_ok ? "ok" : "FAILED");

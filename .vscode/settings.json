@@ -4,5 +4,18 @@
     // the `/*` opening line (gray) and the ` * ` continuation lines (green)
     // render in two colors. Disabling multiline processing keeps block comments
     // uniform while leaving the `//` tag highlighting (!, ?, TODO) intact.
-    "better-comments.multilineComments": false
+    "better-comments.multilineComments": false,
+
+    // Inlay hints (ms-vscode.cpptools): show parameter names at call sites,
+    // deduced auto/decl types, and & for reference params. Off by default.
+    "editor.inlayHints.enabled": "on",
+    "C_Cpp.inlayHints.parameterNames.enabled": true,
+    "C_Cpp.inlayHints.parameterNames.hideLeadingUnderscores": true,
+    "C_Cpp.inlayHints.referenceOperator.enabled": true,
+    "C_Cpp.inlayHints.autoDeclarationTypes.enabled": true,
+
+    // Render the hints smaller and with a little breathing room, so they read as
+    // annotations rather than as code.
+    "editor.inlayHints.fontSize": 11,
+    "editor.inlayHints.padding": true
 }
