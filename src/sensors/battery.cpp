@@ -83,7 +83,7 @@ namespace
 		return ema;
 	}
 
-	int mv_to_percent(int32_t mv)
+	uint8_t mv_to_percent(int32_t mv)
 	{
 		if (mv <= kCurve[0].mv)
 		{
@@ -99,7 +99,9 @@ namespace
 			{
 				const BatteryPoint lo = kCurve[i - 1];
 				const BatteryPoint hi = kCurve[i];
-				return lo.pct + (int)((mv - lo.mv) * (hi.pct - lo.pct) / (hi.mv - lo.mv));
+				/* Interpolate in int (mv deltas overflow uint8_t); result is 0..100. */
+				const int pct = lo.pct + (int)((mv - lo.mv) * (hi.pct - lo.pct) / (hi.mv - lo.mv));
+				return (uint8_t)pct;
 			}
 		}
 		return 100;

@@ -14,21 +14,14 @@
  * only wake it to emit the periodic log lines — so COM9 sees a burst every
  * TICK_MS, not a continuous stream. */
 static const struct device *const console_dev = DEVICE_DT_GET(DT_CHOSEN(zephyr_console));
-
 static void console_uart(bool on)
 {
 	pm_device_action_run(console_dev, on ? PM_DEVICE_ACTION_RESUME : PM_DEVICE_ACTION_SUSPEND);
 }
 
-/* Dual cadence (see docs/power-analysis.md): the CO2 single-shot costs ~70 mAs
- * (dominates the energy budget) while a T+RH-only read is ~1000x cheaper. So tick
- * every 30 s doing a cheap T+RH read, and only every CO2_EVERY_TICKS-th tick (=
- * 5 min) do the full CO2 read. */
-static constexpr int TICK_MS = 30000;
-static constexpr int CO2_EVERY_TICKS = 10;
-
-/* Below this (on the primary/external channel) show the low-battery screen. */
-static constexpr int LOW_BATTERY_PCT = 5;
+static constexpr int TICK_MS = 30000;	   // 30 s between each measurement cycle (5 min CO2 + 30 s T+RH)
+static constexpr int CO2_EVERY_TICKS = 10; // full CO2 read every 10 ticks (5 min)
+static constexpr int LOW_BATTERY_PCT = 5;  // battery percent threshold for the low-battery warning on the display
 
 /* Device mode. Measurement only runs in Normal; calibration/reset (later) switch
  * the mode and the button handler drives their flow. */
@@ -36,11 +29,9 @@ enum class Mode : uint8_t
 {
 	Normal /*, Calibration, Reset */
 };
+
 static Mode mode = Mode::Normal;
 static bool display_ok;
-
-/* Last full CO2 reading, held on screen between the 5-min CO2 reads while the
- * cheap T+RH ticks refresh temperature/humidity. */
 static uint16_t last_co2_ppm;
 static uint32_t tick_count;
 
@@ -50,16 +41,13 @@ static void do_measurement()
 {
 	const bool full_co2 = (tick_count % CO2_EVERY_TICKS) == 0;
 
-	/* Battery: sample every tick (cheap ADC; battery::sample smooths internally) but
-	 * only push it to the status bar on the 5-min CO2 tick, so a percent step never
-	 * forces an e-paper refresh on the cheap T+RH ticks. */
 	BatteryReading b{};
 	const bool batt_ok = (battery::sample(&b) == 0);
-	const int batt_pct = batt_ok ? b.ext_pct : 100;
+	const uint8_t batt_pct = batt_ok ? b.ext_pct : 100;
 
 	if (full_co2 && batt_ok && display_ok)
 	{
-		ui::set_battery((uint8_t)batt_pct, b.charging);
+		ui::set_battery(batt_pct, b.charging);
 	}
 
 	Scd41Reading r{};
@@ -84,7 +72,7 @@ static void do_measurement()
 		{
 			if (batt_ok && batt_pct <= LOW_BATTERY_PCT)
 			{
-				ui::set_low_battery((uint8_t)batt_pct);
+				ui::set_low_battery(batt_pct);
 			}
 			else
 			{

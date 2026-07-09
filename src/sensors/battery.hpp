@@ -14,9 +14,9 @@
 struct BatteryReading
 {
 	int32_t ext_mv; /* battery voltage via P0.31 divider (BAT+), smoothed */
-	int ext_pct;
+	uint8_t ext_pct; /* 0..100 */
 	int32_t int_mv; /* supply voltage via internal VDDH/5, smoothed */
-	int int_pct;
+	uint8_t int_pct; /* 0..100 */
 	bool charging; /* USB present: VDDH sits well above BAT+ (instantaneous) */
 };
 
