@@ -68,6 +68,22 @@ namespace
 		printk("SCD41: ASC disabled and persisted to EEPROM\n");
 	}
 
+	/** Leave periodic measurement and wait for the sensor to go idle.
+	 *
+	 * @retval 0     idle, ready for a command
+	 * @retval -EIO  the I2C write failed
+	 */
+	int stop_periodic()
+	{
+		const uint8_t stop[2] = {0x3F, 0x86}; // stop_periodic_measurement
+		if (i2c_write_dt(&scd41_bus, stop, sizeof(stop)) < 0)
+		{
+			return -EIO;
+		}
+		k_msleep(500); // datasheet: no command is accepted for 500 ms afterwards
+		return 0;
+	}
+
 } // namespace
 
 int scd41::init()
@@ -130,4 +146,45 @@ int scd41::sample_rht(Scd41Reading *out)
 	const uint8_t pd[2] = {0x36, 0xE0}; // power_down
 	i2c_write_dt(&scd41_bus, pd, sizeof(pd));
 	return 0;
+}
+
+int scd41::calibrate_begin()
+{
+	wake();
+
+	const uint8_t start[2] = {0x21, 0xB1}; // start_periodic_measurement
+	return (i2c_write_dt(&scd41_bus, start, sizeof(start)) < 0) ? -EIO : 0;
+}
+
+int scd41::calibrate_finish(uint16_t target_ppm, int16_t *correction_ppm)
+{
+	if (stop_periodic() < 0)
+	{
+		return -EIO;
+	}
+
+	/* The driver's set_idle_mode() branches on the DEVICETREE mode, which is
+	 * single-shot, so it would send wake_up rather than stop the periodic measurement
+	 * we started above -- hence stop_periodic() here. From this point it does the right
+	 * thing: FRC on an idle sensor, then setup_measurement(), which for single-shot is
+	 * a power_down. That is exactly our normal resting state. */
+	uint16_t correction = 0;
+	if (scd4x_forced_recalibration(scd41_dev, target_ppm, &correction) < 0)
+	{
+		return -EIO; // includes the sensor's own 0xFFFF "I do not believe that reading"
+	}
+
+	*correction_ppm = (int16_t)correction; // the driver already removed the 0x8000 bias
+	return 0;
+}
+
+int scd41::calibrate_abort()
+{
+	if (stop_periodic() < 0)
+	{
+		return -EIO;
+	}
+
+	const uint8_t pd[2] = {0x36, 0xE0}; // power_down, back to the single-shot regime
+	return (i2c_write_dt(&scd41_bus, pd, sizeof(pd)) < 0) ? -EIO : 0;
 }

@@ -43,4 +43,39 @@ namespace scd41
 	 * @retval -EIO  an I2C transfer failed
 	 */
 	int sample_rht(Scd41Reading *out);
+
+	/** Put the sensor into periodic measurement, the mode a recalibration needs.
+	 *
+	 * A forced recalibration is only valid if the sensor has been measuring the target
+	 * air in its normal operating mode for a few minutes. Single-shot does not count,
+	 * so the flow switches modes, waits, and switches back.
+	 *
+	 * While this is in effect, sample() and sample_rht() must NOT be called: they issue
+	 * single-shot commands the sensor will not honour mid-measurement.
+	 *
+	 * @retval 0     the sensor is measuring every 5 s
+	 * @retval -EIO  an I2C transfer failed
+	 */
+	int calibrate_begin();
+
+	/** Recalibrate against a known concentration, then return to single-shot.
+	 *
+	 * Stops periodic measurement, waits out the sensor's settling time, and runs the
+	 * forced recalibration. The driver leaves the sensor powered down afterwards, i.e.
+	 * back in our normal regime -- no reboot needed.
+	 *
+	 * @param      target_ppm     what the surrounding air really is, e.g. 420 outdoors
+	 * @param[out] correction_ppm how far the calibration moved; may be negative
+	 * @retval 0     recalibrated
+	 * @retval -EIO  the sensor refused (it answers 0xFFFF when the reading was
+	 *               implausible), or an I2C transfer failed; the calibration is unchanged
+	 */
+	int calibrate_finish(uint16_t target_ppm, int16_t *correction_ppm);
+
+	/** Leave periodic measurement without recalibrating anything.
+	 *
+	 * @retval 0     back in single-shot, sensor powered down
+	 * @retval -EIO  an I2C transfer failed
+	 */
+	int calibrate_abort();
 } // namespace scd41
