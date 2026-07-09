@@ -100,14 +100,10 @@ namespace
 	View pending_view = VIEW_BOOT; /* staged by a set_<view>; committed by refresh() */
 	bool dirty;                    /* a setter changed something since the last refresh */
 	int partials_since_full;
+	bool ready; /* init() built the widgets; every entry point no-ops until then */
 
-	/* False until init() has built the widgets. Every public entry point returns early
-	 * on it, so a failed display init makes the whole UI a safe no-op and callers do
-	 * not each have to guard their ui:: calls (the widgets would be null). */
-	bool ready;
-
-	/* Skip-refresh dedup (per data source). The last_* sentinels are int, not the
-	 * uint8_t of the API, because they use -1 for "nothing shown yet". */
+	/* Skip-refresh dedup. The last_* sentinels are int, not the API's uint8_t,
+	 * because they use -1 for "nothing shown yet". */
 	bool have_last_reading;
 	uint16_t last_co2_ppm, last_hum_x100;
 	int32_t last_temp_x100;

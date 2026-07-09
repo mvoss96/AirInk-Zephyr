@@ -70,10 +70,9 @@ namespace
 		return 0;
 	}
 
-	/* Per-channel EMA of the cell voltage (mV). The SAADC jitters a few mV per read,
-	 * which on the steep part of the Li-Ion curve bounces the percentage by several
-	 * points. We filter the mV (the continuous measured quantity) rather than the
-	 * derived integer % so the filter keeps sub-percent resolution. */
+	// Filter the mV, not the derived integer % -- the continuous quantity keeps the
+	// filter's sub-percent resolution. SAADC jitter of a few mV bounces the percent
+	// by several points on the steep part of the Li-Ion curve.
 	Ema ext_mv_ema;
 	Ema int_mv_ema;
 

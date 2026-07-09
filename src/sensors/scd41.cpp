@@ -18,9 +18,8 @@ namespace
 	const struct device *const scd41_dev = DEVICE_DT_GET(DT_NODELABEL(scd41));
 	const struct i2c_dt_spec scd41_bus = I2C_DT_SPEC_GET(DT_NODELABEL(scd41));
 
-	/* Temperature EMA, shared across the full and rht-only reads since both measure
-	 * the same channel. The SCD41 has ~0.05 C noise, which at the 0.1 C we display
-	 * flickers the last digit; the EMA settles it. */
+	// Shared by both reads (same channel). ~0.05 C of noise would otherwise flicker
+	// the last digit at the 0.1 C we display.
 	Ema temp_ema;
 
 	/*
