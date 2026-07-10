@@ -164,6 +164,39 @@ Battery life (stable air): CO2-5min/T+RH-30s ~135 d (was 106); CO2-10min/T+RH-30
 **~223 d** (was 151) @ 1000 mAh. Real life sits between the "every tick refreshes"
 and "stable" bounds depending on how often T/RH cross a step.
 
+## The interactive screens (menu, calibration)
+
+Measured with `bench/ui_power.cpp` (`-DAPP_ENTRY=ui_power`), PPK2 source 3815 mV,
+power-cycled before each capture. The button cannot be pressed by a script, so the
+harness walks into each state directly.
+
+| What | Energy | Notes |
+|---|---|---|
+| E-paper **full** refresh | **3.9 mAs** | 0.95 s, peak 25 mA |
+| E-paper **partial** refresh | **3.0 mAs** | 0.85 s, peak 23–25 mA |
+| One **CO₂ recalibration** (3 min) | **2588 mAs** ≈ 0.72 mAh | avg 14.3 mA over 181 s |
+
+**Partial vs. full refresh is a 0.9 mAs difference — not an energy lever.** The menu and
+the calibration steps use partial refreshes because a full one is a ~1 s black flash,
+which makes navigation feel broken. Energy did not enter into it. (A first reading of a
+"60.7 mAs full refresh" was a misattribution: that burst is the SCD41's first periodic
+measurement, which happens to land right after the boot splash.)
+
+**A recalibration is dominated by the sensor, not the screen.** In periodic mode the
+SCD41 measures every ~4.9 s: 36 bursts of ~50 mA for ~1.2 s, on a 3.4 mA baseline. The
+twelve countdown redraws add ~36 mAs — 1.4 % of the total. Redrawing every second
+instead would cost ~540 mAs, which is why the countdown ticks every 15 s.
+
+Against a 2000 mAh cell a calibration costs **0.036 %**, about as much as half an hour of
+normal operation. It is affordable and does not need optimising.
+
+> **Caveat.** Both harnesses idle at ~236 µA rather than the firmware's 60 µA. They do
+> not reproduce `main()`'s init/suspend sequence — `MODE_MENU_IDLE` never calls
+> `scd41::init()`, so the sensor never receives its `power_down`. Do not read an idle
+> floor out of these captures.
+
+---
+
 ## Methodology / what was tested
 
 Isolation firmwares (`bench/power_test.cpp`, `TEST_MODE`; build with

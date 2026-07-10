@@ -23,6 +23,24 @@ namespace
 
 	int64_t press_ms;
 	bool down;
+	bool long_fired; // the hold already became an event; the release is not a tap
+
+	/** Fire the hold while the finger is still down.
+	 *
+	 * Classifying on release would mean the user holds, sees nothing happen, lets go,
+	 * and only then the screen changes. Runs in timer (ISR) context, so it does the one
+	 * thing that is safe there: enqueue.
+	 */
+	void long_press_expiry(struct k_timer *t)
+	{
+		ARG_UNUSED(t);
+
+		Gesture g = {.kind = (uint8_t)button::Event::Long,
+					 .held_ms = (uint16_t)button::LONG_PRESS_MS};
+		long_fired = true;
+		k_msgq_put(&gesture_q, &g, K_NO_WAIT);
+	}
+	K_TIMER_DEFINE(long_timer, long_press_expiry, nullptr);
 
 	/** Turn press/release into a gesture.
 	 *
@@ -46,18 +64,27 @@ namespace
 		{
 			press_ms = k_uptime_get();
 			down = true;
+			long_fired = false;
+			k_timer_start(&long_timer, K_MSEC(button::LONG_PRESS_MS), K_NO_WAIT);
 			return;
 		}
 		if (!down)
 		{
 			return; // a release we never saw the press for (e.g. held across boot)
 		}
+
+		// Stop before reading the flag: afterwards the timer cannot fire any more, so
+		// if it beat us to it, long_fired is already set and this release is not a tap.
+		k_timer_stop(&long_timer);
 		down = false;
+		if (long_fired)
+		{
+			return;
+		}
 
 		const int64_t held = k_uptime_get() - press_ms;
 		Gesture g = {
-			.kind = (uint8_t)((held >= button::LONG_PRESS_MS) ? button::Event::Long
-															  : button::Event::Short),
+			.kind = (uint8_t)button::Event::Short,
 			.held_ms = (uint16_t)((held > UINT16_MAX) ? UINT16_MAX : held),
 		};
 		k_msgq_put(&gesture_q, &g, K_NO_WAIT); // full queue: drop, never block

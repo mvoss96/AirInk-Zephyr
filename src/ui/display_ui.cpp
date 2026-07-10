@@ -271,6 +271,23 @@ namespace
 		lv_obj_add_flag(calib_root, LV_OBJ_FLAG_HIDDEN);
 	}
 
+	/** Is this a view the user steps through with the button?
+	 *
+	 * A full refresh is a ~2 s black flash. Paying it on every cursor move makes the
+	 * device feel broken, so these views are entered and navigated with partial
+	 * refreshes. The ghosting they leave -- the inverted cursor bar and the big DSEG7
+	 * digits are the worst of it -- is cleared by the one full refresh that happens on
+	 * the way back out to a resting view.
+	 *
+	 * @param v the view to classify
+	 * @return true for the menu, the calibration steps and the reset countdown
+	 */
+	bool transient(View v)
+	{
+		return v == VIEW_MENU || v == VIEW_CALIB_PROMPT ||
+			   v == VIEW_CALIB_COUNTDOWN || v == VIEW_RESET;
+	}
+
 	/** The container that belongs to a view.
 	 *
 	 * @param v the view to look up
@@ -897,9 +914,12 @@ void ui::refresh()
 		lv_obj_clear_flag(root_for(pending_view), LV_OBJ_FLAG_HIDDEN);
 	}
 
-	// Full on a view change and periodically to clear ghosting; partial for
-	// in-place value / status-bar updates.
-	const bool full = view_changed || partials_since_full >= FULL_REFRESH_EVERY;
+	// Full on the first paint, on arriving at a resting view (which also cleans up
+	// after the transient ones), and periodically to clear ghosting. Everything the
+	// user navigates through, and every in-place value update, is partial.
+	const bool full = (shown_view == VIEW_NONE) ||
+					  partials_since_full >= FULL_REFRESH_EVERY ||
+					  (view_changed && !transient(pending_view));
 	flush(full);
 
 	partials_since_full = full ? 0 : partials_since_full + 1;

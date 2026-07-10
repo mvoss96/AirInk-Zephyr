@@ -14,8 +14,9 @@
  */
 namespace button
 {
-	// A hold longer than this is a Long press. Short enough to feel deliberate, long
-	// enough that a tap never lands here by accident.
+	/* A hold longer than this is a Long press, and it is delivered the moment the
+	 * threshold passes -- not on release. Holding while nothing happens, and the screen
+	 * only changing after letting go, reads as a broken device. */
 	constexpr int64_t LONG_PRESS_MS = 700;
 
 	enum class Event : uint8_t
@@ -39,9 +40,10 @@ namespace button
 	 *
 	 * @param      deadline_ms absolute k_uptime_get() value to stop waiting at; a
 	 *                         deadline already in the past polls without blocking
-	 * @param[out] held_ms     optional: how long the button was actually down, which is
-	 *                         the only way to see how close a gesture came to
-	 *                         LONG_PRESS_MS. Untouched when the deadline passes first.
+	 * @param[out] held_ms     optional: how long the button was down. For a tap this
+	 *                         shows how close it came to LONG_PRESS_MS; for a hold it is
+	 *                         LONG_PRESS_MS, because the event fires there rather than
+	 *                         on release. Untouched when the deadline passes first.
 	 * @return the gesture, or Event::None if the deadline passed first
 	 */
 	Event wait_until(int64_t deadline_ms, uint16_t *held_ms = nullptr);
