@@ -123,4 +123,18 @@ namespace ui
 	 */
 	void refresh();
 
+	/** Log how full the LVGL pool is.
+	 * Every view is built once and kept resident, so a pool that fits at boot fits
+	 * forever -- and running it dry is an MPU fault, not a graceful failure. The peak
+	 * also covers the transient glyph draw buffers a render allocates (b612_48 alone is
+	 * ~2 KB), which is the figure that says whether the pool is generously sized.
+	 *
+	 * A no-op wherever the pool cannot be weighed: the host sim runs LVGL on a 16 MB
+	 * malloc heap with 64-bit pointers, so a figure from there would be a
+	 * plausible-sounding lie.
+	 *
+	 * @param tag what had just happened, for the log line
+	 */
+	void log_pool(const char *tag);
+
 } // namespace ui

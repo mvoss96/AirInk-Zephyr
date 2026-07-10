@@ -4,11 +4,6 @@
 #include <zephyr/devicetree.h>
 #include <zephyr/pm/device.h>
 
-#ifdef CONFIG_SYS_HEAP_RUNTIME_STATS
-#include <zephyr/sys/mem_stats.h>
-#include <lvgl_mem.h>
-#endif
-
 #include "input/button.hpp"
 #include "menu.hpp"
 #include "sensors/battery.hpp"
@@ -38,27 +33,6 @@ static Scd41Reading last_reading; // held on screen between reads, and across th
 static uint32_t tick_count;		  // number of measurement cycles since boot
 static bool low_battery;		  // latched; while set the SCD41 is not read at all
 static bool charging;
-
-/** Report how full the LVGL pool is.
- *
- * Every view is built once and kept resident, so a pool that fits at boot fits forever.
- * `max` also covers the transient glyph draw buffers a render allocates (b612_48 alone
- * is ~2 KB), which is the number that decides whether LV_Z_MEM_POOL_SIZE is generous.
- *
- * @param tag what had just happened, for the log line
- */
-static void log_lvgl_heap(const char *tag)
-{
-#ifdef CONFIG_SYS_HEAP_RUNTIME_STATS
-	struct sys_memory_stats s{};
-	lvgl_heap_stats(&s);
-	printk("[LVGL] %-12s used %u  peak %u  free %u  of %u B\n", tag,
-		   (unsigned)s.allocated_bytes, (unsigned)s.max_allocated_bytes,
-		   (unsigned)s.free_bytes, CONFIG_LV_Z_MEM_POOL_SIZE);
-#else
-	ARG_UNUSED(tag);
-#endif
-}
 
 /** Stage the sensor view with whatever we last measured.
  *
@@ -194,7 +168,7 @@ int main(void)
 		printk("Button not ready (continuing without it)\n");
 	}
 	menu::init(show_sensor_view);
-	log_lvgl_heap("boot splash"); // every view is built; this is the resident cost
+	ui::log_pool("boot splash"); // every view is built; this is the resident cost
 
 	/* The loop runs on main's own stack, not the system work queue: a CO2 single-shot
 	 * blocks for ~5 s, and gpio-keys debounces on that queue -- blocking it would eat
@@ -260,7 +234,7 @@ int main(void)
 		{
 			// After the first sensor render: the DSEG7-48 glyphs are the widest draw
 			// buffers the UI ever asks for, so this is where the peak shows up.
-			log_lvgl_heap("first render");
+			ui::log_pool("first render");
 			heap_logged = true;
 		}
 		console_uart(false);

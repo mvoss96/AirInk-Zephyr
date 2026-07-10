@@ -7,9 +7,9 @@
 #include <stdlib.h>
 #include <lvgl.h>
 
-/* Only the Zephyr build can weigh the LVGL pool: the host sim runs LVGL on a 16 MB
- * malloc heap, with 64-bit pointers and 8-bit colour, so any figure it produced would
- * be a plausible-sounding lie. */
+/* The one place that reaches into LVGL's Zephyr heap shim. Only the target build can
+ * weigh the pool: the host sim runs LVGL on a 16 MB malloc heap, with 64-bit pointers
+ * and 8-bit colour, so any figure it produced would be a plausible-sounding lie. */
 #ifdef CONFIG_SYS_HEAP_RUNTIME_STATS
 #include <zephyr/sys/mem_stats.h>
 #include <lvgl_mem.h>
@@ -927,4 +927,20 @@ void ui::refresh()
 	partials_since_full = full ? 0 : partials_since_full + 1;
 	shown_view = pending_view;
 	dirty = false;
+}
+
+void ui::log_pool(const char *tag)
+{
+#ifdef CONFIG_SYS_HEAP_RUNTIME_STATS
+	struct sys_memory_stats s{};
+	lvgl_heap_stats(&s);
+
+	char line[80];
+	snprintf(line, sizeof(line), "[LVGL] %-12s used %u  peak %u  free %u  of %u B\n", tag,
+			 (unsigned)s.allocated_bytes, (unsigned)s.max_allocated_bytes,
+			 (unsigned)s.free_bytes, (unsigned)CONFIG_LV_Z_MEM_POOL_SIZE);
+	plat::log(line);
+#else
+	(void)tag;
+#endif
 }
