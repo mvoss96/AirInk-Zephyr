@@ -103,15 +103,19 @@ namespace ui
 	 */
 	void set_calib_prompt();
 
-	/** Stage the calibration countdown.
+	/** Stage the calibration progress.
 	 *
-	 * The SCD41 runs periodic measurement for these three minutes: the datasheet wants
-	 * it measuring the target air in its normal operating mode before a forced
+	 * The SCD41 runs periodic measurement for three minutes: the datasheet wants it
+	 * measuring the target air in its normal operating mode before a forced
 	 * recalibration.
 	 *
-	 * @param seconds_left seconds remaining before the recalibration is sent
+	 * A bar, not a seconds countdown. Every redraw costs a whole panel refresh, so the
+	 * display can only be updated every few seconds -- and a number showing seconds
+	 * promises to tick every one of them. A bar promises nothing but progress.
+	 *
+	 * @param pct how far along, 0..100 (clamped)
 	 */
-	void set_calib_countdown(uint16_t seconds_left);
+	void set_calib_progress(uint8_t pct);
 
 	/** Commit every staged change with a single e-paper refresh.
 	 * Full refresh on a view change and periodically to clear ghosting, partial

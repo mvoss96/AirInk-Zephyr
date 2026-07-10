@@ -134,9 +134,9 @@ int main()
 	snapshot("calib_prompt");
 
 	g_tick_ms += 100;
-	ui::set_calib_countdown(165);
+	ui::set_calib_progress(35);
 	ui::refresh();
-	snapshot("calib_countdown");
+	snapshot("calib_progress");
 
 	g_tick_ms += 100;
 	ui::set_error("SENSOR ERROR", "SCD41 not responding");

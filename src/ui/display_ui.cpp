@@ -46,6 +46,9 @@ namespace
 	constexpr int MENU_ITEM_H = 48;
 	constexpr int MENU_TOP = (CONTENT_H - (int)ui::Menu::Count * MENU_ITEM_H) / 2;
 
+	constexpr int BAR_W = 300, BAR_H = 32, BAR_BORDER = 3;
+	constexpr int BAR_INNER_W = BAR_W - 2 * BAR_BORDER;
+
 	// Status bar (never hidden).
 	lv_obj_t *status_bar;
 	lv_obj_t *batt_frame, *batt_fill, *batt_bolt, *batt_pct_lbl, *link_lbl;
@@ -103,8 +106,8 @@ namespace
 	 * so the step change is a view change and thus a full refresh -- the big DSEG7
 	 * digits appearing would ghost badly under a partial one. Within the countdown the
 	 * view does not change, so its ticks stay partial. */
-	lv_obj_t *calib_root, *calib_title, *calib_row;
-	lv_obj_t *calib_value, *calib_unit, *calib_body, *calib_hint;
+	lv_obj_t *calib_root, *calib_title, *calib_bar, *calib_bar_fill;
+	lv_obj_t *calib_body, *calib_hint;
 
 	/* Views + refresh bookkeeping. Setters stage `pending_view` and dirty the
 	 * widgets; ui::refresh() commits: hide/show the view + ONE panel refresh. */
@@ -118,7 +121,7 @@ namespace
 		VIEW_RESET,
 		VIEW_MENU,
 		VIEW_CALIB_PROMPT,
-		VIEW_CALIB_COUNTDOWN
+		VIEW_CALIB_PROGRESS
 	};
 	View shown_view = VIEW_NONE;   // what the panel currently shows
 	View pending_view = VIEW_BOOT; // staged by a set_<view>; committed by refresh()
@@ -136,7 +139,7 @@ namespace
 	int last_lowbat_pct = -1;
 	int last_reset_seconds = -1;
 	int last_menu_sel = -1;
-	int last_calib_seconds = -1;
+	int last_calib_pct = -1;
 
 	// ---- pool accounting ----
 
@@ -285,7 +288,7 @@ namespace
 	bool transient(View v)
 	{
 		return v == VIEW_MENU || v == VIEW_CALIB_PROMPT ||
-			   v == VIEW_CALIB_COUNTDOWN || v == VIEW_RESET;
+			   v == VIEW_CALIB_PROGRESS || v == VIEW_RESET;
 	}
 
 	/** The container that belongs to a view.
@@ -303,7 +306,7 @@ namespace
 		case VIEW_RESET:  return reset_root;
 		case VIEW_MENU:   return menu_root;
 		case VIEW_CALIB_PROMPT:
-		case VIEW_CALIB_COUNTDOWN: return calib_root;
+		case VIEW_CALIB_PROGRESS: return calib_root;
 		default:          return boot_root;
 		}
 	}
@@ -580,7 +583,7 @@ namespace
 		lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -8);
 	}
 
-	/** Build the shared calibration skeleton: title, big value, body, hint. */
+	/** Build the shared calibration skeleton: title, progress bar, body, hint. */
 	void build_calib(lv_obj_t *scr)
 	{
 		calib_root = make_view(scr);
@@ -588,20 +591,22 @@ namespace
 		calib_title = make_label(calib_root, &b612_28, CONTENT_W);
 		lv_obj_align(calib_title, LV_ALIGN_TOP_MID, 0, 16);
 
-		calib_row = lv_obj_create(calib_root);
-		lv_obj_remove_style_all(calib_row);
-		lv_obj_set_size(calib_row, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-		lv_obj_clear_flag(calib_row, LV_OBJ_FLAG_SCROLLABLE);
-		lv_obj_set_flex_flow(calib_row, LV_FLEX_FLOW_ROW);
-		lv_obj_set_flex_align(calib_row, LV_FLEX_ALIGN_CENTER,
-							  LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
-		lv_obj_set_style_pad_column(calib_row, 5, 0);
+		// Outline + proportional fill, the same primitives as the battery gauge: no
+		// LVGL bar widget, no anti-aliasing to smear on a 1-bit panel.
+		calib_bar = lv_obj_create(calib_root);
+		lv_obj_remove_style_all(calib_bar);
+		lv_obj_set_size(calib_bar, BAR_W, BAR_H);
+		lv_obj_align(calib_bar, LV_ALIGN_CENTER, 0, -10);
+		lv_obj_set_style_border_color(calib_bar, lv_color_black(), 0);
+		lv_obj_set_style_border_width(calib_bar, BAR_BORDER, 0);
+		lv_obj_clear_flag(calib_bar, LV_OBJ_FLAG_SCROLLABLE);
 
-		calib_value = make_label(calib_row, &dseg7_48, 0);
-		calib_unit = make_label(calib_row, &b612_28, 0);
-		lv_obj_set_style_translate_y(calib_unit,
-									 (lv_coord_t)(b612_28.base_line - dseg7_48.base_line), 0);
-		lv_obj_align(calib_row, LV_ALIGN_CENTER, 0, -10);
+		calib_bar_fill = lv_obj_create(calib_bar);
+		lv_obj_remove_style_all(calib_bar_fill);
+		lv_obj_set_size(calib_bar_fill, 0, BAR_H - 4 * BAR_BORDER); // width set per update
+		lv_obj_align(calib_bar_fill, LV_ALIGN_LEFT_MID, BAR_BORDER, 0);
+		lv_obj_set_style_bg_color(calib_bar_fill, lv_color_black(), 0);
+		lv_obj_set_style_bg_opa(calib_bar_fill, LV_OPA_COVER, 0);
 
 		calib_body = make_label(calib_root, &b612_16, CONTENT_W - 60);
 
@@ -611,31 +616,26 @@ namespace
 
 	/** Fill the calibration skeleton for one step.
 	 *
-	 * @param title headline
-	 * @param value big DSEG7 digits, or NULL to hide the value row
-	 * @param unit  what the big value counts
-	 * @param body  explanation; sits in the middle when there is no value row
-	 * @param hint  what the button does here
+	 * @param title   headline
+	 * @param show_bar false hides the progress bar and centres the body in its place
+	 * @param body    explanation
+	 * @param hint    what the button does here
 	 */
-	void calib_fill(const char *title, const char *value, const char *unit,
-					const char *body, const char *hint)
+	void calib_fill(const char *title, bool show_bar, const char *body, const char *hint)
 	{
 		lv_label_set_text(calib_title, title);
 		lv_label_set_text(calib_hint, hint);
+		lv_label_set_text(calib_body, body);
 
-		if (value)
+		if (show_bar)
 		{
-			lv_label_set_text(calib_value, value);
-			lv_label_set_text(calib_unit, unit);
-			lv_obj_clear_flag(calib_row, LV_OBJ_FLAG_HIDDEN);
+			lv_obj_clear_flag(calib_bar, LV_OBJ_FLAG_HIDDEN);
 		}
 		else
 		{
-			lv_obj_add_flag(calib_row, LV_OBJ_FLAG_HIDDEN);
+			lv_obj_add_flag(calib_bar, LV_OBJ_FLAG_HIDDEN);
 		}
-
-		lv_label_set_text(calib_body, body);
-		lv_obj_align(calib_body, LV_ALIGN_CENTER, 0, value ? 62 : -10);
+		lv_obj_align(calib_body, LV_ALIGN_CENTER, 0, show_bar ? 52 : -10);
 	}
 
 } // namespace
@@ -866,33 +866,35 @@ void ui::set_calib_prompt()
 		return;
 	}
 	pending_view = VIEW_CALIB_PROMPT;
-	calib_fill("CALIBRATE CO2", nullptr, "",
+	calib_fill("CALIBRATE CO2", false,
 			   "Take the device outside, or hold it at a wide open window, "
 			   "and leave it there for three minutes.",
 			   "Hold = start     Tap = cancel");
-	last_calib_seconds = -1; // the countdown has not run yet
+	last_calib_pct = -1; // the bar has not run yet
 	dirty = true;
 }
 
-void ui::set_calib_countdown(uint16_t seconds_left)
+void ui::set_calib_progress(uint8_t pct)
 {
 	if (!ready)
 	{
 		return;
 	}
-	pending_view = VIEW_CALIB_COUNTDOWN;
+	pending_view = VIEW_CALIB_PROGRESS;
 
-	if ((int)seconds_left == last_calib_seconds)
+	if (pct > 100)
 	{
-		return; // same countdown already on the widgets
+		pct = 100;
+	}
+	if ((int)pct == last_calib_pct)
+	{
+		return; // the bar is already at this length
 	}
 
-	char secs[8];
-	snprintf(secs, sizeof(secs), "%u", seconds_left);
-	calib_fill("CALIBRATING", secs, "s",
-			   "Leave the device in the fresh air.", "Hold to abort");
+	calib_fill("CALIBRATING", true, "Leave the device in the fresh air.", "Hold to abort");
+	lv_obj_set_width(calib_bar_fill, (lv_coord_t)(pct * BAR_INNER_W / 100));
 
-	last_calib_seconds = seconds_left;
+	last_calib_pct = pct;
 	dirty = true;
 }
 

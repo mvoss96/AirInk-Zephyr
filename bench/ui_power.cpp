@@ -27,8 +27,8 @@
 
 static const struct device *const console_dev = DEVICE_DT_GET(DT_CHOSEN(zephyr_console));
 
-/** Mirror the firmware's countdown cadence: redraw every 15 s, not every second. */
-static constexpr int64_t COUNTDOWN_DRAW_MS = 15000;
+/** Mirror the firmware's cadence: the bar advances with the sensor's 5 s interval. */
+static constexpr int64_t CALIB_DRAW_MS = 5000;
 static constexpr int64_t CALIB_MS = 180000;
 
 int main(void)
@@ -84,10 +84,11 @@ int main(void)
 	int64_t next_draw = k_uptime_get();
 	while (k_uptime_get() < end_at)
 	{
-		ui::set_calib_countdown((uint16_t)((end_at - k_uptime_get() + 999) / 1000));
+		const int64_t done = CALIB_MS - (end_at - k_uptime_get());
+		ui::set_calib_progress((uint8_t)(done * 100 / CALIB_MS));
 		ui::refresh();
 		pm_device_action_run(console_dev, PM_DEVICE_ACTION_SUSPEND);
-		next_draw += COUNTDOWN_DRAW_MS;
+		next_draw += CALIB_DRAW_MS;
 		k_sleep(K_TIMEOUT_ABS_MS(next_draw));
 		pm_device_action_run(console_dev, PM_DEVICE_ACTION_RESUME);
 	}

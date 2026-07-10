@@ -12,10 +12,14 @@ namespace
 	constexpr int64_t PROMPT_IDLE_MS = 120000; // long enough to carry the device outside
 	constexpr int64_t CALIB_MS = 180000;       // the datasheet's warm-up before an FRC
 
-	/* The countdown is redrawn every 15 s, not every second. A partial refresh costs
-	 * ~3 mAs, so a per-second countdown would spend ~540 mAs to animate a number the
-	 * user glances at twice. */
-	constexpr int64_t COUNTDOWN_DRAW_MS = 15000;
+	/* The bar advances in step with the sensor's own 5 s measurement interval: 36 steps
+	 * over the three minutes. A panel refresh costs ~3.0 mAs and takes 0.85 s, so this
+	 * adds ~108 mAs -- 4 % of the calibration -- while a per-second bar would spend
+	 * ~540 mAs and keep the panel running back-to-back. Note the bar is not cheaper than
+	 * the number it replaced: LV_Z_FULL_REFRESH means every flush writes the whole
+	 * panel, whatever changed. It is honest, not cheap: a number showing seconds
+	 * promises to tick every second, and could not keep that promise. */
+	constexpr int64_t CALIB_DRAW_MS = 5000;
 
 	enum class State : uint8_t
 	{
@@ -30,9 +34,9 @@ namespace
 	bool recalibrated;
 	void (*show_sensor)();
 
-	int64_t idle_at = INT64_MAX;     // Menu / CalibPrompt time out here
-	int64_t calib_end_at;            // CalibRun sends the FRC here
-	int64_t next_countdown_draw_at;  // CalibRun redraws here
+	int64_t idle_at = INT64_MAX; // Menu / CalibPrompt time out here
+	int64_t calib_end_at;        // CalibRun sends the FRC here
+	int64_t next_draw_at;        // CalibRun advances the bar here
 
 	const char *name(State s)
 	{
@@ -98,9 +102,9 @@ namespace
 		go(State::CalibRun);
 		idle_at = INT64_MAX; // no idle timeout: nothing is waiting on the user
 		calib_end_at = now + CALIB_MS;
-		next_countdown_draw_at = now + COUNTDOWN_DRAW_MS;
+		next_draw_at = now + CALIB_DRAW_MS;
 		printk("[CAL] warming up for %lld s\n", CALIB_MS / 1000);
-		ui::set_calib_countdown((uint16_t)(CALIB_MS / 1000));
+		ui::set_calib_progress(0);
 	}
 
 	void abort_calib()
@@ -224,7 +228,7 @@ int64_t menu::deadline_ms()
 	{
 		return idle_at;
 	}
-	return (next_countdown_draw_at < calib_end_at) ? next_countdown_draw_at : calib_end_at;
+	return (next_draw_at < calib_end_at) ? next_draw_at : calib_end_at;
 }
 
 void menu::on_deadline()
@@ -246,10 +250,11 @@ void menu::on_deadline()
 		{
 			finish_calib();
 		}
-		else if (now >= next_countdown_draw_at)
+		else if (now >= next_draw_at)
 		{
-			ui::set_calib_countdown((uint16_t)((calib_end_at - now + 999) / 1000));
-			next_countdown_draw_at = now + COUNTDOWN_DRAW_MS;
+			const int64_t done = CALIB_MS - (calib_end_at - now);
+			ui::set_calib_progress((uint8_t)(done * 100 / CALIB_MS));
+			next_draw_at = now + CALIB_DRAW_MS;
 		}
 		break;
 
