@@ -84,6 +84,17 @@ namespace
 		return 0;
 	}
 
+	/** Back to the single-shot regime's resting state (command 0x36E0).
+	 *
+	 * @retval 0     the sensor is asleep
+	 * @retval -EIO  the I2C write failed
+	 */
+	int power_down()
+	{
+		const uint8_t pd[2] = {0x36, 0xE0};
+		return (i2c_write_dt(&scd41_bus, pd, sizeof(pd)) < 0) ? -EIO : 0;
+	}
+
 } // namespace
 
 int scd41::init()
@@ -143,8 +154,7 @@ int scd41::sample_rht(Scd41Reading *out)
 	out->temp_x100 = temp_ema.update(-4500 + (int32_t)(17500LL * t_raw / 65535));
 	out->hum_x100 = (uint16_t)(10000LL * h_raw / 65535);
 
-	const uint8_t pd[2] = {0x36, 0xE0}; // power_down
-	i2c_write_dt(&scd41_bus, pd, sizeof(pd));
+	power_down();
 	return 0;
 }
 
@@ -158,8 +168,12 @@ int scd41::calibrate_begin()
 
 int scd41::calibrate_finish(uint16_t target_ppm, int16_t *correction_ppm)
 {
+	// Every failure below powers the sensor down on its way out. Without that a failed
+	// stop leaves it drawing ~50 mA every 5 s, and a failed FRC leaves it idle rather
+	// than asleep -- in both cases until some later measurement happens to clean up.
 	if (stop_periodic() < 0)
 	{
+		power_down();
 		return -EIO;
 	}
 
@@ -171,7 +185,8 @@ int scd41::calibrate_finish(uint16_t target_ppm, int16_t *correction_ppm)
 	uint16_t correction = 0;
 	if (scd4x_forced_recalibration(scd41_dev, target_ppm, &correction) < 0)
 	{
-		return -EIO; // includes the sensor's own 0xFFFF "I do not believe that reading"
+		power_down(); // the driver only reaches its own on the success path
+		return -EIO;  // includes the sensor's own 0xFFFF "I do not believe that reading"
 	}
 
 	*correction_ppm = (int16_t)correction; // the driver already removed the 0x8000 bias
@@ -180,11 +195,6 @@ int scd41::calibrate_finish(uint16_t target_ppm, int16_t *correction_ppm)
 
 int scd41::calibrate_abort()
 {
-	if (stop_periodic() < 0)
-	{
-		return -EIO;
-	}
-
-	const uint8_t pd[2] = {0x36, 0xE0}; // power_down, back to the single-shot regime
-	return (i2c_write_dt(&scd41_bus, pd, sizeof(pd)) < 0) ? -EIO : 0;
+	const int err = stop_periodic();
+	return (power_down() < 0 || err < 0) ? -EIO : 0;
 }
