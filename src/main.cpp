@@ -51,8 +51,6 @@ static void show_sensor_view()
 
 /** Read the battery and update the low-battery latch.
  *
- * Hysteresis rather than a plain threshold: the smoothed percent drifts across a single
- * boundary, and each flap would be a view change, i.e. a full-refresh black flash.
  * Charging always releases the latch.
  *
  * @return the percent, or BATT_UNKNOWN if the ADC read failed (the latch then stands)
@@ -114,38 +112,6 @@ static void measure_sensor(int batt_pct)
 	tick_count++;
 }
 
-/** One measurement cycle.
- *
- * The battery is read in either mode -- the status bar is visible on every view. The
- * SCD41 is not touched while the user is in the menu: it may be mid-calibration, where a
- * single-shot command would be refused, and even if it is not, nobody is looking.
- *
- * A CO2 single-shot is ~70 mAs (~86 % of the budget), so a low battery suspends it
- * entirely and lets the last few percent coast at the ~60 uA idle while the panel holds
- * the warning without power. The warning outranks whatever the user was doing.
- */
-static void do_tick()
-{
-	const int batt_pct = measure_battery();
-
-	if (low_battery)
-	{
-		if (mode == Mode::Menu)
-		{
-			menu::abort(); // ends a calibration if one was running
-			mode = Mode::Sensor;
-		}
-		printk("[LOW] batt %d%%%s  measurement suspended\n", batt_pct, charging ? " CHG" : "");
-		ui::set_low_battery();
-		return;
-	}
-
-	if (mode == Mode::Sensor)
-	{
-		measure_sensor(batt_pct);
-	}
-}
-
 /** Bring up the display, sensors and button, then loop over measurement cycles.
  *
  * @return 0 when a fatal sensor error leaves its message on the panel; otherwise
@@ -192,8 +158,7 @@ int main(void)
 	{
 		const int64_t menu_at = (mode == Mode::Menu) ? menu::deadline_ms() : INT64_MAX;
 		uint16_t held_ms = 0;
-		const button::Event e =
-			button::wait_until((menu_at < next_tick) ? menu_at : next_tick, &held_ms);
+		const button::Event e = button::wait_until((menu_at < next_tick) ? menu_at : next_tick, &held_ms);
 
 		console_uart(true);
 
@@ -201,8 +166,38 @@ int main(void)
 		{
 			// The held time, not just the verdict: the only way to see how close a
 			// gesture came to LONG_PRESS_MS without guessing at the threshold.
-			printk("[BTN] %s (%u ms)%s\n", (e == button::Event::Long) ? "hold" : "tap",
-				   held_ms, low_battery ? " ignored, battery low" : "");
+			printk("[BTN] %s (%u ms)\n", (e == button::Event::Long) ? "hold" : "tap", held_ms);
+		}
+
+		const int64_t now = k_uptime_get();
+		const bool tick_due = now >= next_tick;
+		if (tick_due)
+		{
+			// Advance before measuring: a ~5 s CO2 read must not push the cadence, and a
+			// three-minute calibration must not leave six ticks to fire back-to-back.
+			while (next_tick <= now)
+			{
+				next_tick += TICK_MS;
+			}
+		}
+
+		const int batt_pct = measure_battery();
+
+		// A low battery ends everything else. A CO2 single-shot is ~70 mAs (~86 % of the
+		// budget) and a calibration ~2600 mAs, so the last few percent coast at the ~60 uA
+		// idle while the panel holds the warning without power.
+		if (low_battery)
+		{
+			if (mode == Mode::Menu)
+			{
+				menu::abort(); // stops a calibration, which would leave the SCD41 running
+				mode = Mode::Sensor;
+			}
+			printk("[LOW] batt %d%%%s  measurement suspended\n", batt_pct, charging ? " CHG" : "");
+			ui::set_low_battery();
+			ui::refresh();
+			console_uart(false);
+			continue;
 		}
 
 		if (mode == Mode::Menu)
@@ -235,21 +230,16 @@ int main(void)
 				break;
 			}
 		}
-		else if (e == button::Event::Long && !low_battery)
+		else if (e == button::Event::Long)
 		{
-			// A calibration costs ~2600 mAs; do not start one on a dying cell.
 			mode = Mode::Menu;
 			menu::enter();
 		}
 
-		const int64_t now = k_uptime_get();
-		if (now >= next_tick)
+		if (tick_due && mode == Mode::Sensor)
 		{
-			do_tick();
-			while (next_tick <= now)
-			{
-				next_tick += TICK_MS;
-			}
+			measure_sensor(batt_pct); // in the menu nobody is looking, and the SCD41 may
+									  // be mid-calibration, where single-shot is refused
 		}
 
 		ui::refresh(); // exactly one panel refresh per iteration, whatever happened
