@@ -34,9 +34,33 @@ namespace
 	int64_t calib_end_at;            // CalibRun sends the FRC here
 	int64_t next_countdown_draw_at;  // CalibRun redraws here
 
+	const char *name(State s)
+	{
+		switch (s)
+		{
+		case State::Menu: return "menu";
+		case State::CalibPrompt: return "calib-prompt";
+		case State::CalibRun: return "calib-run";
+		default: return "sensor";
+		}
+	}
+
+	/** The only place `state` is assigned, so no transition can go unlogged.
+	 *
+	 * @param next where we are going; the same state is not a transition
+	 */
+	void go(State next)
+	{
+		if (next != state)
+		{
+			printk("[UI] %s -> %s\n", name(state), name(next));
+		}
+		state = next;
+	}
+
 	void to_sensor()
 	{
-		state = State::Sensor;
+		go(State::Sensor);
 		idle_at = INT64_MAX;
 		if (show_sensor)
 		{
@@ -46,7 +70,7 @@ namespace
 
 	void to_menu()
 	{
-		state = State::Menu;
+		go(State::Menu);
 		cursor = ui::Menu::Calibrate;
 		idle_at = k_uptime_get() + MENU_IDLE_MS;
 		ui::set_menu(cursor);
@@ -54,7 +78,7 @@ namespace
 
 	void to_calib_prompt()
 	{
-		state = State::CalibPrompt;
+		go(State::CalibPrompt);
 		idle_at = k_uptime_get() + PROMPT_IDLE_MS;
 		ui::set_calib_prompt();
 	}
@@ -65,13 +89,13 @@ namespace
 		{
 			printk("[CAL] could not start periodic measurement\n");
 			ui::set_error("CALIBRATION FAILED", "Sensor did not respond");
-			state = State::Sensor;
+			go(State::Sensor);
 			idle_at = INT64_MAX;
 			return;
 		}
 
 		const int64_t now = k_uptime_get();
-		state = State::CalibRun;
+		go(State::CalibRun);
 		idle_at = INT64_MAX; // no idle timeout: nothing is waiting on the user
 		calib_end_at = now + CALIB_MS;
 		next_countdown_draw_at = now + COUNTDOWN_DRAW_MS;
@@ -101,7 +125,7 @@ namespace
 			// the target. Nothing was changed, so there is nothing to undo.
 			printk("[CAL] rejected: was the device really in fresh air?\n");
 			ui::set_error("CALIBRATION FAILED", "Was it really outside?");
-			state = State::Sensor;
+			go(State::Sensor);
 			idle_at = INT64_MAX;
 			return;
 		}
@@ -166,6 +190,7 @@ void menu::on_button(button::Event e)
 		if (e == button::Event::Short)
 		{
 			cursor = (ui::Menu)(((int)cursor + 1) % (int)ui::Menu::Count);
+			printk("[UI] menu cursor %d\n", (int)cursor);
 			ui::set_menu(cursor);
 		}
 		else if (cursor == ui::Menu::Calibrate)

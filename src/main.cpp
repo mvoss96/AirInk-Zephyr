@@ -212,10 +212,19 @@ int main(void)
 	while (true)
 	{
 		const int64_t menu_at = menu::deadline_ms();
-		const button::Event e = button::wait_until((menu_at < next_tick) ? menu_at : next_tick);
+		uint16_t held_ms = 0;
+		const button::Event e =
+			button::wait_until((menu_at < next_tick) ? menu_at : next_tick, &held_ms);
 
 		console_uart(true);
 
+		if (e != button::Event::None)
+		{
+			// The held time, not just the verdict: the only way to see how close a
+			// gesture came to LONG_PRESS_MS without guessing at the threshold.
+			printk("[BTN] %s (%u ms)%s\n", (e == button::Event::Long) ? "hold" : "tap",
+				   held_ms, low_battery ? " ignored, battery low" : "");
+		}
 		if (!low_battery)
 		{
 			menu::on_button(e); // while the warning is up, the button does nothing

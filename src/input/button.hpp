@@ -37,11 +37,14 @@ namespace button
 	 * Presses that arrive while the caller is busy are queued, not lost, so a tap
 	 * during a five-second CO2 read is still acted upon afterwards.
 	 *
-	 * @param deadline_ms absolute k_uptime_get() value to stop waiting at; a deadline
-	 *                    already in the past polls without blocking
+	 * @param      deadline_ms absolute k_uptime_get() value to stop waiting at; a
+	 *                         deadline already in the past polls without blocking
+	 * @param[out] held_ms     optional: how long the button was actually down, which is
+	 *                         the only way to see how close a gesture came to
+	 *                         LONG_PRESS_MS. Untouched when the deadline passes first.
 	 * @return the gesture, or Event::None if the deadline passed first
 	 */
-	Event wait_until(int64_t deadline_ms);
+	Event wait_until(int64_t deadline_ms, uint16_t *held_ms = nullptr);
 
 	/** Is the button held down right now?
 	 *

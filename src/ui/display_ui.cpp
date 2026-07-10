@@ -7,6 +7,14 @@
 #include <stdlib.h>
 #include <lvgl.h>
 
+/* Only the Zephyr build can weigh the LVGL pool: the host sim runs LVGL on a 16 MB
+ * malloc heap, with 64-bit pointers and 8-bit colour, so any figure it produced would
+ * be a plausible-sounding lie. */
+#ifdef CONFIG_SYS_HEAP_RUNTIME_STATS
+#include <zephyr/sys/mem_stats.h>
+#include <lvgl_mem.h>
+#endif
+
 /*
  * AirInk UI: one flat file. A persistent status bar (battery +
  * link) sits at the top and is never hidden; below it, one content view (boot /
@@ -129,6 +137,44 @@ namespace
 	int last_reset_seconds = -1;
 	int last_menu_sel = -1;
 	int last_calib_seconds = -1;
+
+	// ---- pool accounting ----
+
+	/** Bytes currently allocated from the LVGL pool.
+	 *
+	 * @return the figure, or 0 where it cannot be measured (the host sim)
+	 */
+	uint32_t heap_used()
+	{
+#ifdef CONFIG_SYS_HEAP_RUNTIME_STATS
+		struct sys_memory_stats s{};
+		lvgl_heap_stats(&s);
+		return (uint32_t)s.allocated_bytes;
+#else
+		return 0;
+#endif
+	}
+
+	/** Log what one builder cost the pool. Views are resident, so this is what it
+	 * costs forever, not just during init().
+	 *
+	 * @param view   name for the log line
+	 * @param before heap_used() from just before the builder ran
+	 * @return heap_used() now, ready to be passed to the next call
+	 */
+	uint32_t log_built(const char *view, uint32_t before)
+	{
+		const uint32_t now = heap_used();
+#ifdef CONFIG_SYS_HEAP_RUNTIME_STATS
+		char line[48];
+		snprintf(line, sizeof(line), "[LVGL] %-11s %5u B\n", view, (unsigned)(now - before));
+		plat::log(line);
+#else
+		(void)view;
+		(void)before;
+#endif
+		return now;
+	}
 
 	// ---- widget helpers ----
 
@@ -517,7 +563,7 @@ namespace
 		lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -8);
 	}
 
-	/** Build the shared calibration skeleton: title, big value, body, Start/Cancel. */
+	/** Build the shared calibration skeleton: title, big value, body, hint. */
 	void build_calib(lv_obj_t *scr)
 	{
 		calib_root = make_view(scr);
@@ -589,14 +635,25 @@ int ui::init()
 	lv_obj_set_style_bg_color(scr, lv_color_white(), 0);
 	lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
 
+	// Weigh each view as it is built: they are all resident, so this is the standing
+	// cost of the pool, and the number to look at before adding the next screen.
+	uint32_t h = heap_used();
 	build_status_bar(scr);
+	h = log_built("status bar", h);
 	build_boot(scr);
+	h = log_built("boot", h);
 	build_sensor(scr);
+	h = log_built("sensor", h);
 	build_error(scr);
+	h = log_built("error", h);
 	build_lowbat(scr);
+	h = log_built("lowbat", h);
 	build_reset(scr);
+	h = log_built("reset", h);
 	build_menu(scr);
+	h = log_built("menu", h);
 	build_calib(scr);
+	log_built("calib", h);
 	ready = true;
 
 	// Boot splash: pending_view is VIEW_BOOT and shown is VIEW_NONE, so refresh()
