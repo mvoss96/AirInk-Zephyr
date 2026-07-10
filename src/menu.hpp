@@ -8,17 +8,21 @@
  *
  * This module exists only while the user is inside it. It has no "sensor" state, knows
  * nothing about readings, the battery or the measurement cadence, and never refreshes
- * the panel -- it only stages its own three views. main.cpp owns the mode, the readings,
- * and every other view.
+ * the panel -- it only stages its own views. main.cpp owns the mode, the readings, and
+ * every other view.
+ *
+ * A failed calibration is the menu's own business: it puts the message up and waits for
+ * the user to acknowledge it, so main never learns that one happened.
  *
  *   enter()                      the user held the button on the sensor view
  *   proceed(gesture)  -> Running the user is still in here
  *                     -> Exited  put the readings back on screen
- *                     -> ...     something happened that main has to render
  *
  * Root --hold(Calibrate)--> CalibPrompt --hold--> CalibRun --3 min--> Recalibrated
  *  | tap = next entry            | tap = Exited        | hold = Exited (aborts)
- *  | hold(Exit) / 30 s idle = Exited
+ *  | hold(Exit) / 30 s idle = Exited                   | sensor said no
+ *                                                      v
+ *                                        CalibFailed --any gesture / 30 s idle--> Exited
  */
 namespace menu
 {
@@ -28,11 +32,9 @@ namespace menu
 	/** What proceed() wants main to do next. */
 	enum class Status : uint8_t
 	{
-		Running,      // still inside; nothing for main to do
-		Exited,       // show the readings again
-		Recalibrated, // the sensor was recalibrated; the retained CO2 value is stale
-		Failed        // nothing was changed; the [CAL] log says whether the sensor
-					  // refused the air it measured or did not answer at all
+		Running,	 // still inside; nothing for main to do
+		Exited,		 // show the readings again
+		Recalibrated // as Exited, but the retained CO2 value predates the correction
 	};
 
 	/** Open the menu on its first entry. */

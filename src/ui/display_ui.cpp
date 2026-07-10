@@ -685,7 +685,7 @@ void ui::show_sensor()
 	{
 		return;
 	}
-	pending_view = VIEW_SENSOR; // refresh() sees the view change; the widgets are unchanged
+	pending_view = VIEW_SENSOR; // the widgets keep whatever set_sensor() last wrote
 }
 
 void ui::set_sensor(uint16_t co2_ppm, int32_t temp_x100, uint16_t hum_x100)
@@ -694,7 +694,6 @@ void ui::set_sensor(uint16_t co2_ppm, int32_t temp_x100, uint16_t hum_x100)
 	{
 		return;
 	}
-	pending_view = VIEW_SENSOR;
 
 	// Dedup on the DISPLAYED value (CO2 exact ppm, T to 0.1 C, RH to whole %) so a
 	// change below what's shown (e.g. 26.03 -> 26.05 C, or 43.05 -> 43.17 % which
@@ -900,7 +899,13 @@ void ui::set_calib_progress(uint8_t pct)
 		return; // the bar is already at this length
 	}
 
-	calib_fill("CALIBRATING", true, "Leave the device in the fresh air.", "Hold to abort");
+	// A full bar means the three minutes are over and the corrected value is being read,
+	// which takes ~5 s more. There is nothing left to abort, so the hint stops offering
+	// it: a hold here reaches the sensor view and opens the menu, like a hold anywhere.
+	const bool warming_up = (pct < 100);
+	calib_fill("CALIBRATING", true,
+			   warming_up ? "Leave the device in the fresh air." : "Reading the corrected value.",
+			   warming_up ? "Hold to abort" : "");
 	lv_obj_set_width(calib_bar_fill, (lv_coord_t)(pct * BAR_INNER_W / 100));
 
 	last_calib_pct = pct;

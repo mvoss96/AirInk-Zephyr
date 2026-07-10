@@ -93,7 +93,9 @@ int main()
 	ui::refresh();
 	snapshot("boot");
 
+	// show_sensor() selects the view, set_sensor() fills it -- as main's measure() does.
 	g_tick_ms += 100;
+	ui::show_sensor();
 	ui::set_sensor(842, 2345, 4500); // 842 ppm, 23.4 C, 45 %
 	ui::refresh();
 	snapshot("sensor");
@@ -101,7 +103,7 @@ int main()
 	g_tick_ms += 100;
 	ui::set_link(ui::Link::ZigbeeConnected); // link token -> ZB
 	ui::set_battery(42, false);				 // bolt -> percentage
-	ui::set_sensor(1487, 2680, 6200);		 // wide values
+	ui::set_sensor(1487, 2680, 6200);		 // wide values, view already selected
 	ui::refresh();
 	snapshot("sensor_high");
 
@@ -137,6 +139,18 @@ int main()
 	ui::set_calib_progress(35);
 	ui::refresh();
 	snapshot("calib_progress");
+
+	// The full bar the user sees during the CO2 read that follows the recalibration.
+	g_tick_ms += 100;
+	ui::set_calib_progress(100);
+	ui::refresh();
+	snapshot("calib_done");
+
+	// Staged by the menu itself, and dismissed by any gesture -- hence the hint line.
+	g_tick_ms += 100;
+	ui::set_error("CALIBRATION FAILED", "PRESS TO CONTINUE");
+	ui::refresh();
+	snapshot("calib_failed");
 
 	g_tick_ms += 100;
 	ui::set_error("SENSOR ERROR", "SCD41 not responding");

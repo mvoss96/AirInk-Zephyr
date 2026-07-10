@@ -28,7 +28,8 @@ namespace
 	{
 		Root,
 		CalibPrompt,
-		CalibRun
+		CalibRun,
+		CalibFailed
 	};
 
 	State state = State::Root;
@@ -44,6 +45,7 @@ namespace
 		{
 		case State::CalibPrompt: return "calib-prompt";
 		case State::CalibRun: return "calib-run";
+		case State::CalibFailed: return "calib-failed";
 		default: return "root";
 		}
 	}
@@ -68,17 +70,31 @@ namespace
 		ui::set_calib_prompt();
 	}
 
+	/** Show what went wrong and wait for the user to take note.
+	 *
+	 * Nothing was changed, so there is nothing to decide: any gesture dismisses this, and
+	 * so does the idle timeout, for a device left alone on a windowsill. The [CAL] log
+	 * line above the call says whether the sensor refused the air it measured or never
+	 * answered at all -- the screen only has room for the verdict.
+	 */
+	void to_calib_failed()
+	{
+		go(State::CalibFailed);
+		idle_at = k_uptime_get() + MENU_IDLE_MS;
+		ui::set_error("CALIBRATION FAILED", "PRESS TO CONTINUE");
+	}
+
 	/** Put the SCD41 into periodic measurement and start the three minutes.
 	 *
-	 * @return Running once the bar is on screen, Failed if the sensor did not accept the
-	 *         command
+	 * @return always Running: the failure has its own screen, which is still the menu
 	 */
 	menu::Status to_calib_run()
 	{
 		if (scd41::calibrate_begin() < 0)
 		{
 			printk("[CAL] could not start periodic measurement\n");
-			return menu::Status::Failed;
+			to_calib_failed();
+			return menu::Status::Running;
 		}
 
 		const int64_t now = k_uptime_get();
@@ -92,8 +108,9 @@ namespace
 
 	/** Recalibrate against fresh air, then leave.
 	 *
-	 * @return Recalibrated on success, Failed when the sensor answered 0xFFFF -- it did
-	 *         not believe the air it measured was the target, and changed nothing
+	 * @return Recalibrated on success; Running when the sensor answered 0xFFFF -- it did
+	 *         not believe the air it measured was the target, changed nothing, and we stay
+	 *         in the menu to say so
 	 */
 	menu::Status finish_calib()
 	{
@@ -101,7 +118,8 @@ namespace
 		if (scd41::calibrate_finish(menu::CALIB_TARGET_PPM, &correction) < 0)
 		{
 			printk("[CAL] the sensor rejected the recalibration\n");
-			return menu::Status::Failed;
+			to_calib_failed();
+			return menu::Status::Running;
 		}
 
 		printk("[CAL] done, corrected by %+d ppm\n", correction);
@@ -180,6 +198,10 @@ menu::Status menu::proceed(button::Event e)
 		}
 		if (now >= calib_end_at)
 		{
+			// A full bar before the ~5 s CO2 read that follows, which happens with this
+			// screen still up: the last step lands at ~97 % otherwise, and the wait then
+			// looks like a stall rather than like a finished warm-up.
+			ui::set_calib_progress(100);
 			return finish_calib();
 		}
 		if (now >= next_draw_at)
@@ -189,6 +211,9 @@ menu::Status menu::proceed(button::Event e)
 			next_draw_at = now + CALIB_DRAW_MS;
 		}
 		return Status::Running;
+
+	case State::CalibFailed:
+		return (e != button::Event::None || now >= idle_at) ? Status::Exited : Status::Running;
 	}
 	return Status::Exited; // unreachable; a new state must be handled above
 }

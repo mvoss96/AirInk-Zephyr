@@ -22,8 +22,7 @@ if(APP_ENTRY STREQUAL "main")
 	# registered behind its back.
 	target_sources(app PRIVATE
 		src/main.cpp
-		src/app/menu.cpp
-		src/app/sensorview.cpp
+		src/menu.cpp
 		src/input/button.cpp
 	)
 elseif(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/bench/${APP_ENTRY}.cpp)
