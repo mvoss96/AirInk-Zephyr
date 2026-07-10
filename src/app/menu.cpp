@@ -70,15 +70,15 @@ namespace
 
 	/** Put the SCD41 into periodic measurement and start the three minutes.
 	 *
-	 * @return Running once the countdown is on screen, SensorError if the sensor did
-	 *         not accept the command
+	 * @return Running once the bar is on screen, Failed if the sensor did not accept the
+	 *         command
 	 */
 	menu::Status to_calib_run()
 	{
 		if (scd41::calibrate_begin() < 0)
 		{
 			printk("[CAL] could not start periodic measurement\n");
-			return menu::Status::SensorError;
+			return menu::Status::Failed;
 		}
 
 		const int64_t now = k_uptime_get();
@@ -92,16 +92,16 @@ namespace
 
 	/** Recalibrate against fresh air, then leave.
 	 *
-	 * @return Recalibrated on success, Rejected when the sensor answered 0xFFFF -- it
-	 *         did not believe the air it measured was the target, and changed nothing
+	 * @return Recalibrated on success, Failed when the sensor answered 0xFFFF -- it did
+	 *         not believe the air it measured was the target, and changed nothing
 	 */
 	menu::Status finish_calib()
 	{
 		int16_t correction = 0;
 		if (scd41::calibrate_finish(menu::CALIB_TARGET_PPM, &correction) < 0)
 		{
-			printk("[CAL] rejected: was the device really in fresh air?\n");
-			return menu::Status::Rejected;
+			printk("[CAL] the sensor rejected the recalibration\n");
+			return menu::Status::Failed;
 		}
 
 		printk("[CAL] done, corrected by %+d ppm\n", correction);

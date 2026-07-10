@@ -679,6 +679,15 @@ int ui::init()
 	return 0;
 }
 
+void ui::show_sensor()
+{
+	if (!ready)
+	{
+		return;
+	}
+	pending_view = VIEW_SENSOR; // refresh() sees the view change; the widgets are unchanged
+}
+
 void ui::set_sensor(uint16_t co2_ppm, int32_t temp_x100, uint16_t hum_x100)
 {
 	if (!ready)

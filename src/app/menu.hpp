@@ -31,8 +31,8 @@ namespace menu
 		Running,      // still inside; nothing for main to do
 		Exited,       // show the readings again
 		Recalibrated, // the sensor was recalibrated; the retained CO2 value is stale
-		Rejected,     // the sensor refused: the air was not plausibly the target
-		SensorError   // the SCD41 did not answer at all
+		Failed        // nothing was changed; the [CAL] log says whether the sensor
+					  // refused the air it measured or did not answer at all
 	};
 
 	/** Open the menu on its first entry. */

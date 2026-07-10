@@ -69,6 +69,10 @@ namespace
 	// reading, and the slow settle costs nothing because the first sample seeds it.
 	Ema<5, 3> ext_mv_ema;
 
+	// Survives a failed conversion, so a hiccup neither zeroes the gauge nor flaps the
+	// latch. Zero-initialized: at boot the first successful read fills it in.
+	battery::State state;
+
 } // namespace
 
 int battery::init()
@@ -88,24 +92,28 @@ int battery::init()
 	return 0;
 }
 
-int battery::sample(BatteryReading *out)
+battery::State battery::read()
 {
 	int32_t ext_raw, int_raw;
-	if (read_cell_mv(ch_ext, 4, &ext_raw) < 0)
+	if (read_cell_mv(ch_ext, 4, &ext_raw) < 0 || read_cell_mv(ch_int, 5, &int_raw) < 0)
 	{
-		return -EIO;
-	}
-	if (read_cell_mv(ch_int, 5, &int_raw) < 0)
-	{
-		return -EIO;
+		printk("Battery: ADC read failed, holding %u%%\n", state.pct);
+		return state;
 	}
 
 	// Charging is a step event (USB plugged in): detect it on the raw, instantaneous
 	// voltages so the bolt appears at once instead of after the EMA catches up. This
 	// is the only use of the internal channel; its voltage goes no further.
-	out->charging = (int_raw - ext_raw) > CHARGE_DETECT_MV;
+	state.charging = (int_raw - ext_raw) > CHARGE_DETECT_MV;
+	state.pct = mv_to_percent(ext_mv_ema.update(ext_raw));
 
-	out->bat_mv = ext_mv_ema.update(ext_raw);
-	out->bat_pct = mv_to_percent(out->bat_mv);
-	return 0;
+	if (state.charging || state.pct >= LOW_EXIT_PCT)
+	{
+		state.low = false;
+	}
+	else if (state.pct <= LOW_ENTER_PCT)
+	{
+		state.low = true;
+	}
+	return state;
 }

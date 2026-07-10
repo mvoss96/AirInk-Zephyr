@@ -60,6 +60,12 @@ namespace ui
 	 */
 	void set_link(Link state);
 
+	/** Select the sensor view without touching its values.
+	 * The widgets still hold whatever set_sensor() last wrote, so the caller does not
+	 * have to keep a copy of the readings only to put them back on screen.
+	 */
+	void show_sensor();
+
 	/** Select the sensor view and stage its three readings.
 	 * Values are deduped at display resolution, so a change too small to be shown
 	 * costs no e-paper refresh.
