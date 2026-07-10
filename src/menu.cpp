@@ -21,31 +21,30 @@ namespace
 	 * promises to tick every second, and could not keep that promise. */
 	constexpr int64_t CALIB_DRAW_MS = 5000;
 
+	/* No Sensor state. The sensor view belongs to main, which is the only place that has
+	 * the readings -- giving this module a state for it is what used to force a callback
+	 * back into main. */
 	enum class State : uint8_t
 	{
-		Sensor,
-		Menu,
+		Root,
 		CalibPrompt,
 		CalibRun
 	};
 
-	State state = State::Sensor;
+	State state = State::Root;
 	ui::Menu cursor = ui::Menu::Calibrate;
-	bool recalibrated;
-	void (*show_sensor)();
 
-	int64_t idle_at = INT64_MAX; // Menu / CalibPrompt time out here
-	int64_t calib_end_at;        // CalibRun sends the FRC here
-	int64_t next_draw_at;        // CalibRun advances the bar here
+	int64_t idle_at;     // Root / CalibPrompt time out here
+	int64_t calib_end_at; // CalibRun sends the FRC here
+	int64_t next_draw_at; // CalibRun advances the bar here
 
 	const char *name(State s)
 	{
 		switch (s)
 		{
-		case State::Menu: return "menu";
 		case State::CalibPrompt: return "calib-prompt";
 		case State::CalibRun: return "calib-run";
-		default: return "sensor";
+		default: return "root";
 		}
 	}
 
@@ -57,27 +56,9 @@ namespace
 	{
 		if (next != state)
 		{
-			printk("[UI] %s -> %s\n", name(state), name(next));
+			printk("[UI] menu %s -> %s\n", name(state), name(next));
 		}
 		state = next;
-	}
-
-	void to_sensor()
-	{
-		go(State::Sensor);
-		idle_at = INT64_MAX;
-		if (show_sensor)
-		{
-			show_sensor();
-		}
-	}
-
-	void to_menu()
-	{
-		go(State::Menu);
-		cursor = ui::Menu::Calibrate;
-		idle_at = k_uptime_get() + MENU_IDLE_MS;
-		ui::set_menu(cursor);
 	}
 
 	void to_calib_prompt()
@@ -87,139 +68,129 @@ namespace
 		ui::set_calib_prompt();
 	}
 
-	void to_calib_run()
+	/** Put the SCD41 into periodic measurement and start the three minutes.
+	 *
+	 * @return Running once the countdown is on screen, SensorError if the sensor did
+	 *         not accept the command
+	 */
+	menu::Status to_calib_run()
 	{
 		if (scd41::calibrate_begin() < 0)
 		{
 			printk("[CAL] could not start periodic measurement\n");
-			ui::set_error("CALIBRATION FAILED", "Sensor did not respond");
-			go(State::Sensor);
-			idle_at = INT64_MAX;
-			return;
+			return menu::Status::SensorError;
 		}
 
 		const int64_t now = k_uptime_get();
 		go(State::CalibRun);
-		idle_at = INT64_MAX; // no idle timeout: nothing is waiting on the user
 		calib_end_at = now + CALIB_MS;
 		next_draw_at = now + CALIB_DRAW_MS;
 		printk("[CAL] warming up for %lld s\n", CALIB_MS / 1000);
 		ui::set_calib_progress(0);
+		return menu::Status::Running;
 	}
 
-	void abort_calib()
-	{
-		if (scd41::calibrate_abort() < 0)
-		{
-			printk("[CAL] aborted, but the sensor did not confirm\n");
-		}
-		else
-		{
-			printk("[CAL] aborted by the user\n");
-		}
-		to_sensor();
-	}
-
-	void finish_calib()
+	/** Recalibrate against fresh air, then leave.
+	 *
+	 * @return Recalibrated on success, Rejected when the sensor answered 0xFFFF -- it
+	 *         did not believe the air it measured was the target, and changed nothing
+	 */
+	menu::Status finish_calib()
 	{
 		int16_t correction = 0;
 		if (scd41::calibrate_finish(menu::CALIB_TARGET_PPM, &correction) < 0)
 		{
-			// The sensor answers 0xFFFF when the air it measured cannot plausibly be
-			// the target. Nothing was changed, so there is nothing to undo.
 			printk("[CAL] rejected: was the device really in fresh air?\n");
-			ui::set_error("CALIBRATION FAILED", "Was it really outside?");
-			go(State::Sensor);
-			idle_at = INT64_MAX;
-			return;
+			return menu::Status::Rejected;
 		}
 
 		printk("[CAL] done, corrected by %+d ppm\n", correction);
-		recalibrated = true;
-		to_sensor();
+		return menu::Status::Recalibrated;
 	}
 
 } // namespace
 
-void menu::init(void (*show_sensor_view)())
+void menu::enter()
 {
-	show_sensor = show_sensor_view;
+	state = State::Root;
+	cursor = ui::Menu::Calibrate;
+	idle_at = k_uptime_get() + MENU_IDLE_MS;
+	printk("[UI] menu opened\n");
+	ui::set_menu(cursor);
 }
 
-bool menu::active()
-{
-	return state != State::Sensor;
-}
-
-bool menu::holds_sensor()
-{
-	return state == State::CalibRun;
-}
-
-bool menu::take_recalibrated()
-{
-	const bool was = recalibrated;
-	recalibrated = false;
-	return was;
-}
-
-void menu::force_exit()
+void menu::abort()
 {
 	if (state == State::CalibRun)
 	{
-		abort_calib();
-		return;
+		printk("[CAL] %s\n", (scd41::calibrate_abort() < 0)
+								? "aborted, but the sensor did not confirm"
+								: "aborted");
 	}
-	to_sensor();
+	state = State::Root;
 }
 
-void menu::on_button(button::Event e)
+menu::Status menu::proceed(button::Event e)
 {
-	if (e == button::Event::None)
-	{
-		return;
-	}
+	const int64_t now = k_uptime_get();
 
 	switch (state)
 	{
-	case State::Sensor:
-		if (e == button::Event::Long)
-		{
-			to_menu();
-		}
-		break;
-
-	case State::Menu:
-		idle_at = k_uptime_get() + MENU_IDLE_MS;
+	case State::Root:
 		if (e == button::Event::Short)
 		{
 			cursor = (ui::Menu)(((int)cursor + 1) % (int)ui::Menu::Count);
+			idle_at = now + MENU_IDLE_MS;
 			printk("[UI] menu cursor %d\n", (int)cursor);
 			ui::set_menu(cursor);
 		}
-		else if (cursor == ui::Menu::Calibrate)
+		else if (e == button::Event::Long)
 		{
+			if (cursor != ui::Menu::Calibrate)
+			{
+				return Status::Exited;
+			}
 			to_calib_prompt();
 		}
-		else
+		else if (now >= idle_at)
 		{
-			to_sensor();
+			printk("[UI] menu idle timeout\n");
+			return Status::Exited;
 		}
-		break;
+		return Status::Running;
 
 	case State::CalibPrompt:
 		// The one screen where a tap is the safe choice: a recalibration in the wrong
 		// air cannot be undone.
-		(e == button::Event::Long) ? to_calib_run() : to_sensor();
-		break;
+		if (e == button::Event::Long)
+		{
+			return to_calib_run();
+		}
+		if (e == button::Event::Short || now >= idle_at)
+		{
+			return Status::Exited;
+		}
+		return Status::Running;
 
 	case State::CalibRun:
 		if (e == button::Event::Long)
 		{
-			abort_calib();
+			abort();
+			return Status::Exited;
 		}
-		break;
+		if (now >= calib_end_at)
+		{
+			return finish_calib();
+		}
+		if (now >= next_draw_at)
+		{
+			const int64_t done = CALIB_MS - (calib_end_at - now);
+			ui::set_calib_progress((uint8_t)(done * 100 / CALIB_MS));
+			next_draw_at = now + CALIB_DRAW_MS;
+		}
+		return Status::Running;
 	}
+	return Status::Exited; // unreachable; a new state must be handled above
 }
 
 int64_t menu::deadline_ms()
@@ -229,36 +200,4 @@ int64_t menu::deadline_ms()
 		return idle_at;
 	}
 	return (next_draw_at < calib_end_at) ? next_draw_at : calib_end_at;
-}
-
-void menu::on_deadline()
-{
-	const int64_t now = k_uptime_get();
-
-	switch (state)
-	{
-	case State::Menu:
-	case State::CalibPrompt:
-		if (now >= idle_at)
-		{
-			to_sensor();
-		}
-		break;
-
-	case State::CalibRun:
-		if (now >= calib_end_at)
-		{
-			finish_calib();
-		}
-		else if (now >= next_draw_at)
-		{
-			const int64_t done = CALIB_MS - (calib_end_at - now);
-			ui::set_calib_progress((uint8_t)(done * 100 / CALIB_MS));
-			next_draw_at = now + CALIB_DRAW_MS;
-		}
-		break;
-
-	case State::Sensor:
-		break;
-	}
 }

@@ -29,15 +29,21 @@ static constexpr int BATT_UNKNOWN = -1;			// battery percent when the ADC read f
 static constexpr int LOW_BATTERY_ENTER_PCT = 5; // battery percent at which the low-battery latch engages
 static constexpr int LOW_BATTERY_EXIT_PCT = 8;	// battery percent at which the low-battery latch disengages
 
+/* What the panel is showing. The two modes know nothing about each other: menu.cpp has
+ * no sensor state, and nothing outside this file reads the measurements. */
+enum class Mode : uint8_t
+{
+	Sensor,
+	Menu
+};
+
+static Mode mode = Mode::Sensor;
 static Scd41Reading last_reading; // held on screen between reads, and across the menu
 static uint32_t tick_count;		  // number of measurement cycles since boot
 static bool low_battery;		  // latched; while set the SCD41 is not read at all
 static bool charging;
 
-/** Stage the sensor view with whatever we last measured.
- *
- * The way back from the menu: menu.cpp decides when, main knows what.
- */
+/** Stage the sensor view with whatever we last measured. */
 static void show_sensor_view()
 {
 	ui::set_sensor(last_reading.co2_ppm, last_reading.temp_x100, last_reading.hum_x100);
@@ -110,10 +116,13 @@ static void measure_sensor(int batt_pct)
 
 /** One measurement cycle.
  *
+ * The battery is read in either mode -- the status bar is visible on every view. The
+ * SCD41 is not touched while the user is in the menu: it may be mid-calibration, where a
+ * single-shot command would be refused, and even if it is not, nobody is looking.
+ *
  * A CO2 single-shot is ~70 mAs (~86 % of the budget), so a low battery suspends it
  * entirely and lets the last few percent coast at the ~60 uA idle while the panel holds
- * the warning without power. A calibration holds the sensor in periodic measurement, so
- * only the battery is read then.
+ * the warning without power. The warning outranks whatever the user was doing.
  */
 static void do_tick()
 {
@@ -121,23 +130,20 @@ static void do_tick()
 
 	if (low_battery)
 	{
-		menu::force_exit(); // aborts a calibration; a warning outranks any screen
+		if (mode == Mode::Menu)
+		{
+			menu::abort(); // ends a calibration if one was running
+			mode = Mode::Sensor;
+		}
 		printk("[LOW] batt %d%%%s  measurement suspended\n", batt_pct, charging ? " CHG" : "");
 		ui::set_low_battery();
 		return;
 	}
 
-	if (menu::holds_sensor())
+	if (mode == Mode::Sensor)
 	{
-		return; // the SCD41 is mid-calibration; single-shot commands would be refused
+		measure_sensor(batt_pct);
 	}
-
-	if (menu::active())
-	{
-		return; // the user is reading a menu; do not yank the panel away from them
-	}
-
-	measure_sensor(batt_pct);
 }
 
 /** Bring up the display, sensors and button, then loop over measurement cycles.
@@ -167,7 +173,6 @@ int main(void)
 	{
 		printk("Button not ready (continuing without it)\n");
 	}
-	menu::init(show_sensor_view);
 	ui::log_pool("boot splash"); // every view is built; this is the resident cost
 
 	/* The loop runs on main's own stack, not the system work queue: a CO2 single-shot
@@ -185,7 +190,7 @@ int main(void)
 	bool heap_logged = false;
 	while (true)
 	{
-		const int64_t menu_at = menu::deadline_ms();
+		const int64_t menu_at = (mode == Mode::Menu) ? menu::deadline_ms() : INT64_MAX;
 		uint16_t held_ms = 0;
 		const button::Event e =
 			button::wait_until((menu_at < next_tick) ? menu_at : next_tick, &held_ms);
@@ -199,26 +204,45 @@ int main(void)
 			printk("[BTN] %s (%u ms)%s\n", (e == button::Event::Long) ? "hold" : "tap",
 				   held_ms, low_battery ? " ignored, battery low" : "");
 		}
-		if (!low_battery)
+
+		if (mode == Mode::Menu)
 		{
-			menu::on_button(e); // while the warning is up, the button does nothing
+			// Every way out of the menu ends here, and every one of them decides what
+			// goes on the panel -- the menu itself only ever stages its own views.
+			switch (menu::proceed(e))
+			{
+			case menu::Status::Running:
+				break;
+			case menu::Status::Recalibrated:
+				// The retained CO2 value predates the new calibration; replace it now
+				// rather than wait out the rest of the tick.
+				tick_count = 0;
+				next_tick = k_uptime_get();
+				mode = Mode::Sensor;
+				show_sensor_view();
+				break;
+			case menu::Status::Exited:
+				mode = Mode::Sensor;
+				show_sensor_view();
+				break;
+			case menu::Status::Rejected:
+				mode = Mode::Sensor;
+				ui::set_error("CALIBRATION FAILED", "Was it really outside?");
+				break;
+			case menu::Status::SensorError:
+				mode = Mode::Sensor;
+				ui::set_error("SENSOR ERROR", "SCD41 did not respond");
+				break;
+			}
+		}
+		else if (e == button::Event::Long && !low_battery)
+		{
+			// A calibration costs ~2600 mAs; do not start one on a dying cell.
+			mode = Mode::Menu;
+			menu::enter();
 		}
 
-		int64_t now = k_uptime_get();
-		if (now >= menu::deadline_ms())
-		{
-			menu::on_deadline();
-		}
-
-		if (menu::take_recalibrated())
-		{
-			// The retained CO2 value predates the new calibration, so do not wait out
-			// the rest of the tick to replace it.
-			tick_count = 0;
-			next_tick = k_uptime_get();
-		}
-
-		now = k_uptime_get();
+		const int64_t now = k_uptime_get();
 		if (now >= next_tick)
 		{
 			do_tick();
