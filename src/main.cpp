@@ -121,15 +121,12 @@ static void app_loop()
 
 		// A live console UARTE keeps the HFCLK running: ~1 mA versus the ~60 uA idle floor.
 		pm_device_action_run(console_dev, PM_DEVICE_ACTION_SUSPEND);
-		uint16_t held_ms = 0;
-		e = button::wait_until(wake_at, &held_ms);
+		e = button::wait_until(wake_at);
 		pm_device_action_run(console_dev, PM_DEVICE_ACTION_RESUME);
 
 		if (e != button::Event::None)
 		{
-			// The held time, not just the verdict: the only way to see how close a gesture
-			// came to LONG_PRESS_MS without guessing at the threshold.
-			printk("[BTN] %s (%u ms)\n", (e == button::Event::Long) ? "hold" : "tap", held_ms);
+			printk("[BTN] %s\n", (e == button::Event::Long) ? "hold" : "tap");
 		}
 	}
 }

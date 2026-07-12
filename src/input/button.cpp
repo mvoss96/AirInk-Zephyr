@@ -8,89 +8,59 @@
 
 namespace
 {
+	// The gpio-keys hardware; init() gates on its readiness. The tap/hold split itself
+	// belongs to the input-longpress pseudo-device below.
 	const struct device *const btn_dev = DEVICE_DT_GET(DT_PATH(buttons));
 
-	struct Gesture
-	{
-		uint8_t kind;    // button::Event
-		uint16_t held_ms; // capped; only ever read by a log line
-	};
+	// The input-longpress device (app.overlay) re-emits the raw press/release as two
+	// derived codes. We listen to it, not to the raw button, so the queue only ever sees
+	// finished gestures.
+	const struct device *const lp_dev = DEVICE_DT_GET(DT_NODELABEL(longpress));
 
 	/* A queue, not a k_event: two taps in quick succession are two gestures, and an
 	 * event bit would silently merge them. Four deep is more than a human produces
 	 * during the longest thing we block on (a ~5 s CO2 read). */
-	K_MSGQ_DEFINE(gesture_q, sizeof(Gesture), 4, 4);
+	K_MSGQ_DEFINE(gesture_q, sizeof(uint8_t), 4, 4);
 
-	int64_t press_ms;
-	bool down;
-	bool long_fired; // the hold already became an event; the release is not a tap
-
-	/** Fire the hold while the finger is still down.
+	/** Map a longpress code to a gesture and queue it.
 	 *
-	 * Classifying on release would mean the user holds, sees nothing happen, lets go,
-	 * and only then the screen changes. Runs in timer (ISR) context, so it does the one
-	 * thing that is safe there: enqueue.
-	 */
-	void long_press_expiry(struct k_timer *t)
-	{
-		ARG_UNUSED(t);
-
-		Gesture g = {.kind = (uint8_t)button::Event::Long,
-					 .held_ms = (uint16_t)button::LONG_PRESS_MS};
-		long_fired = true;
-		k_msgq_put(&gesture_q, &g, K_NO_WAIT);
-	}
-	K_TIMER_DEFINE(long_timer, long_press_expiry, nullptr);
-
-	/** Turn press/release into a gesture.
+	 * Runs in the input reporting context (CONFIG_INPUT_MODE_SYNCHRONOUS: the gpio-keys
+	 * debounce work item), so it only enqueues -- never blocks, never touches the panel.
 	 *
-	 * Runs in the reporting context (CONFIG_INPUT_MODE_SYNCHRONOUS: the gpio-keys
-	 * debounce work item), so it only timestamps and posts -- never blocks, never
-	 * touches the panel.
+	 * The long code arrives on its press edge, the instant the hold threshold passes; the
+	 * short code arrives as a press/release pair on release. Either way we act on the
+	 * press edge and ignore the rest.
 	 *
-	 * @param ev   the input event; anything but our key is ignored
+	 * @param ev   the input event; anything but our two derived codes is ignored
 	 * @param user unused
 	 */
 	void on_input(struct input_event *ev, void *user)
 	{
 		ARG_UNUSED(user);
 
-		if (ev->type != INPUT_EV_KEY || ev->code != INPUT_KEY_0)
+		if (ev->type != INPUT_EV_KEY || !ev->value)
 		{
 			return;
 		}
 
-		if (ev->value)
+		uint8_t kind;
+		if (ev->code == INPUT_KEY_MENU)
 		{
-			press_ms = k_uptime_get();
-			down = true;
-			long_fired = false;
-			k_timer_start(&long_timer, K_MSEC(button::LONG_PRESS_MS), K_NO_WAIT);
-			return;
+			kind = (uint8_t)button::Event::Long;
 		}
-		if (!down)
+		else if (ev->code == INPUT_KEY_ENTER)
 		{
-			return; // a release we never saw the press for (e.g. held across boot)
+			kind = (uint8_t)button::Event::Short;
 		}
-
-		// Stop before reading the flag: afterwards the timer cannot fire any more, so
-		// if it beat us to it, long_fired is already set and this release is not a tap.
-		k_timer_stop(&long_timer);
-		down = false;
-		if (long_fired)
+		else
 		{
 			return;
 		}
 
-		const int64_t held = k_uptime_get() - press_ms;
-		Gesture g = {
-			.kind = (uint8_t)button::Event::Short,
-			.held_ms = (uint16_t)((held > UINT16_MAX) ? UINT16_MAX : held),
-		};
-		k_msgq_put(&gesture_q, &g, K_NO_WAIT); // full queue: drop, never block
+		k_msgq_put(&gesture_q, &kind, K_NO_WAIT); // full queue: drop, never block
 	}
 
-	INPUT_CALLBACK_DEFINE(btn_dev, on_input, nullptr);
+	INPUT_CALLBACK_DEFINE(lp_dev, on_input, nullptr);
 
 } // namespace
 
@@ -99,24 +69,15 @@ int button::init()
 	return device_is_ready(btn_dev) ? 0 : -ENODEV;
 }
 
-button::Event button::wait_until(int64_t deadline_ms, uint16_t *held_ms)
+button::Event button::wait_until(int64_t deadline_ms)
 {
 	const int64_t now = k_uptime_get();
 	const k_timeout_t timeout = (deadline_ms <= now) ? K_NO_WAIT : K_MSEC(deadline_ms - now);
 
-	Gesture g;
-	if (k_msgq_get(&gesture_q, &g, timeout) != 0)
+	uint8_t kind;
+	if (k_msgq_get(&gesture_q, &kind, timeout) != 0)
 	{
 		return Event::None;
 	}
-	if (held_ms)
-	{
-		*held_ms = g.held_ms;
-	}
-	return (Event)g.kind;
-}
-
-bool button::is_down()
-{
-	return down;
+	return (Event)kind;
 }

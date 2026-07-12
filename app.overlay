@@ -32,7 +32,7 @@
 };
 
 / {
-	buttons {
+	keys: buttons {
 		compatible = "gpio-keys";
 
 		button0: button_0 {
@@ -41,6 +41,20 @@
 			label = "User button";
 			zephyr,code = <INPUT_KEY_0>;
 		};
+	};
+
+	/*
+	 * Turn the one button's raw press/release into a tap/hold pair. The driver emits
+	 * ENTER on a short press (on release) and MENU the moment the hold threshold passes
+	 * (while still held) -- so button.cpp only has to map two codes, not time the press.
+	 */
+	longpress: longpress {
+		compatible = "zephyr,input-longpress";
+		input = <&keys>;
+		input-codes = <INPUT_KEY_0>;
+		short-codes = <INPUT_KEY_ENTER>;
+		long-codes = <INPUT_KEY_MENU>;
+		long-delay-ms = <700>;
 	};
 
 	aliases {
