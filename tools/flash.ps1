@@ -28,13 +28,13 @@ $root = Split-Path $PSScriptRoot -Parent
 $hex  = Join-Path $root "build\AirInk\zephyr\zephyr.hex"
 
 if ($Build) {
-  $tc = "C:\ncs\toolchains\936afb6332"
-  $env:PATH = "$tc;$tc\mingw64\bin;$tc\bin;$tc\opt\bin;$tc\opt\bin\Scripts;$tc\opt\nanopb\generator-bin;$tc\nrfutil\bin;$tc\opt\zephyr-sdk\arm-zephyr-eabi\bin;$tc\opt\zephyr-sdk\riscv64-zephyr-elf\bin;$env:PATH"
+  $tc = "C:\ncs\toolchains\dcbdc366a1"
+  $env:PATH = "$tc;$tc\mingw64\bin;$tc\bin;$tc\opt\bin;$tc\opt\bin\Scripts;$tc\opt\nanopb\generator-bin;$tc\nrfutil\bin;$tc\opt\zephyr-sdk\gnu\arm-zephyr-eabi\bin;$tc\opt\zephyr-sdk\gnu\riscv64-zephyr-elf\bin;$env:PATH"
   $env:PYTHONPATH = "$tc\opt\bin;$tc\opt\bin\Lib;$tc\opt\bin\Lib\site-packages"
   $env:ZEPHYR_TOOLCHAIN_VARIANT = "zephyr"
   $env:ZEPHYR_SDK_INSTALL_DIR = "$tc\opt\zephyr-sdk"
   $env:NRFUTIL_HOME = "$tc\nrfutil\home"
-  $env:ZEPHYR_BASE = "C:\ncs\v3.3.0\zephyr"
+  $env:ZEPHYR_BASE = "C:\ncs\v3.4.0\zephyr"
   Push-Location $root
   try { & "$tc\opt\bin\Scripts\west.exe" build -b promicro_nrf52840/nrf52840 }
   finally { Pop-Location }

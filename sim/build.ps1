@@ -21,8 +21,8 @@ $onWindows = ($IsWindows -ne $false)
 if (-not $Gcc) { $Gcc = if ($onWindows) { "C:\msys64\mingw64\bin\gcc.exe" } else { "gcc" } }
 if (-not $Gpp) { $Gpp = if ($onWindows) { "C:\msys64\mingw64\bin\g++.exe" } else { "g++" } }
 if (-not $Lvgl) {
-    $Lvgl = if ($onWindows) { "C:\ncs\v3.3.0\modules\lib\gui\lvgl" }
-    else { "$HOME/ncs/v3.3.0/modules/lib/gui/lvgl" } 
+    $Lvgl = if ($onWindows) { "C:\ncs\v3.4.0\modules\lib\gui\lvgl" }
+    else { "$HOME/ncs/v3.4.0/modules/lib/gui/lvgl" }
 }
 
 $sim = $PSScriptRoot
