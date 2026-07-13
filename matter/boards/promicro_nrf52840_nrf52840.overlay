@@ -107,6 +107,42 @@
 	};
 };
 
+/* Battery sensing, straight from AirInk's app.overlay: two SAADC channels, read by
+ * src/sensors/battery.cpp and published to the Matter PowerSource cluster on endpoint 0.
+ *   [0] external divider on P0.31 (300k/100k -> V_bat/4)
+ *   [1] SoC-internal VDDH/5 -- only compared against [0] to detect USB charging. */
+&adc {
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	channel@0 {
+		reg = <0>;
+		zephyr,gain = "ADC_GAIN_1_4";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,acquisition-time = <ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS, 10)>;
+		zephyr,input-positive = <NRF_SAADC_AIN7>;
+		zephyr,resolution = <12>;
+		zephyr,oversampling = <4>;
+	};
+
+	channel@1 {
+		reg = <1>;
+		zephyr,gain = "ADC_GAIN_1_6";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,acquisition-time = <ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS, 10)>;
+		zephyr,input-positive = <NRF_SAADC_VDDHDIV5>;
+		zephyr,resolution = <12>;
+		zephyr,oversampling = <4>;
+	};
+};
+
+/ {
+	zephyr,user {
+		/* [0] = external divider (P0.31, x4), [1] = internal VDDH/5 (x5) */
+		io-channels = <&adc 0>, <&adc 1>;
+	};
+};
+
 &flash0 {
 	partitions {
 		code_partition: partition@1000 {

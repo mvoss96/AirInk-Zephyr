@@ -12,29 +12,87 @@
 #include "clusters/identify.h"
 #include "lib/core/CHIPError.h"
 
+#include "sensors/battery.hpp"
+
 #include <app-common/zap-generated/attributes/Accessors.h>
+#include <app/clusters/air-quality-server/air-quality-server.h>
+#include <app/clusters/concentration-measurement-server/concentration-measurement-server.h>
+#include <app/clusters/power-source-server/power-source-server.h>
 
-#include <zephyr/logging/log.h>
-
-#ifdef CONFIG_SCD4X
 #include <zephyr/drivers/sensor.h>
-
-/* Reuse the sample's temperature-read path, pointed at our SCD41 (SENSOR_CHAN_AMBIENT_TEMP
- * works for the SCD4X driver). Name kept from the sample to minimise churn. */
-const device *sBme688SensorDev = DEVICE_DT_GET(DT_NODELABEL(scd41));
-#endif
+#include <zephyr/logging/log.h>
 
 LOG_MODULE_DECLARE(app, CONFIG_CHIP_APP_LOG_LEVEL);
 
 using namespace ::chip;
 using namespace ::chip::app;
 using namespace ::chip::DeviceLayer;
+using namespace ::chip::app::Clusters;
 
 namespace
 {
-constexpr chip::EndpointId kTemperatureSensorEndpointId = 1;
+/* Endpoint map -- see src/default_zap/airink.zap. Each sensor gets its own endpoint because
+ * each is its own Matter device type; a controller then lists three sensors under one node. */
+constexpr EndpointId kPowerSourceEndpointId = 0; /* root node */
+constexpr EndpointId kTemperatureEndpointId = 1;
+constexpr EndpointId kHumidityEndpointId = 2;
+constexpr EndpointId kAirQualityEndpointId = 3; /* AirQuality + CO2 concentration */
 
-Nrf::Matter::IdentifyCluster sIdentifyCluster(kTemperatureSensorEndpointId);
+/* The battery on endpoint 0 powers everything on the node. */
+EndpointId sPoweredEndpoints[] = { 0, 1, 2, 3 };
+
+const device *sSensorDev = DEVICE_DT_GET(DT_NODELABEL(scd41));
+
+/* Identify is mandatory for each sensor device type, so the ZAP puts it on all three sensor
+ * endpoints -- and it is code-driven, so each one needs its own server instance. Miss one and
+ * a controller's read of that endpoint's Identify attributes fails during the interview. */
+Nrf::Matter::IdentifyCluster sIdentifyClusters[] = {
+	Nrf::Matter::IdentifyCluster(kTemperatureEndpointId),
+	Nrf::Matter::IdentifyCluster(kHumidityEndpointId),
+	Nrf::Matter::IdentifyCluster(kAirQualityEndpointId),
+};
+
+/* Unlike temperature and humidity, the air quality and concentration clusters are not backed
+ * by the ember attribute store -- they are served by these AttributeAccessInterface instances,
+ * which is why the ZAP marks their attributes "External". The concentration template flags are
+ * <Numeric, Level, MediumLevel, CriticalLevel, Peak, Average>: we report a numeric ppm value
+ * and nothing else, and the ZAP's attribute list must match that exactly. */
+AirQuality::Instance sAirQuality(kAirQualityEndpointId,
+				 BitMask<AirQuality::Feature, uint32_t>(AirQuality::Feature::kModerate,
+									AirQuality::Feature::kFair,
+									AirQuality::Feature::kVeryPoor,
+									AirQuality::Feature::kExtremelyPoor));
+
+ConcentrationMeasurement::Instance<true, false, false, false, false, false>
+	sCo2(kAirQualityEndpointId, CarbonDioxideConcentrationMeasurement::Id,
+	     ConcentrationMeasurement::MeasurementMediumEnum::kAir,
+	     ConcentrationMeasurement::MeasurementUnitEnum::kPpm);
+
+/* SCD41 datasheet operating range. */
+constexpr float kCo2MinPpm = 400.0f;
+constexpr float kCo2MaxPpm = 5000.0f;
+
+/* CO2 as a proxy for air quality. The thresholds are the usual indoor-air guidance (Pettenkofer's
+ * 1000 ppm is the "still fine" line; 2000 ppm is where concentration measurably suffers). */
+AirQuality::AirQualityEnum AirQualityFromCo2(uint16_t ppm)
+{
+	if (ppm < 800) {
+		return AirQuality::AirQualityEnum::kGood;
+	}
+	if (ppm < 1000) {
+		return AirQuality::AirQualityEnum::kFair;
+	}
+	if (ppm < 1400) {
+		return AirQuality::AirQualityEnum::kModerate;
+	}
+	if (ppm < 2000) {
+		return AirQuality::AirQualityEnum::kPoor;
+	}
+	if (ppm < 5000) {
+		return AirQuality::AirQualityEnum::kVeryPoor;
+	}
+	return AirQuality::AirQualityEnum::kExtremelyPoor;
+}
 
 #ifdef CONFIG_CHIP_ICD_UAT_SUPPORT
 #ifdef CONFIG_NCS_SAMPLE_MATTER_USE_DEFAULT_BUTTON_HANDLER
@@ -138,55 +196,55 @@ void ButtonTimerTimeoutCallback(k_timer *timer)
 
 #endif
 
-void AppTask::UpdateTemperatureMeasurement()
+void AppTask::PublishMeasurements()
 {
-#ifdef CONFIG_SCD4X
-	/* Real data from the onboard sensor*/
-	int result = sensor_sample_fetch(sBme688SensorDev);
-	if (result == 0) {
+	int err = sensor_sample_fetch(sSensorDev);
+	if (err) {
+		LOG_ERR("SCD41 sample fetch failed: %d", err);
+	} else {
 		sensor_value temperature;
-		int result = sensor_channel_get(sBme688SensorDev, SENSOR_CHAN_AMBIENT_TEMP, &temperature);
-		if (result == 0) {
-			/* Defined by cluster temperature measured value = 100 x temperature in degC with resolution of
-			 * 0.01 degC. val1 is an integer part of the value and val2 is fractional part in one-millionth
-			 * parts. To achieve resolution of 0.01 degC val2 needs to be divided by 10000. */
-			mCurrentTemperature = static_cast<int16_t>(temperature.val1 * 100 + temperature.val2 / 10000);
-			LOG_DBG("New temperature measurement %d.%d *C", temperature.val1, temperature.val2);
-		} else {
-			LOG_ERR("Getting temperature measurement data from BME688 failed with: %d", result);
+		sensor_value humidity;
+		sensor_value co2;
+
+		/* Temperature: the cluster wants centi-degC. val2 is millionths of a degree, so
+		 * /10000 lands on the same scale. Humidity is centi-percent, same arithmetic. */
+		if (sensor_channel_get(sSensorDev, SENSOR_CHAN_AMBIENT_TEMP, &temperature) == 0) {
+			const int16_t centi = static_cast<int16_t>(temperature.val1 * 100 + temperature.val2 / 10000);
+			TemperatureMeasurement::Attributes::MeasuredValue::Set(kTemperatureEndpointId, centi);
 		}
-	} else {
-		LOG_ERR("Fetching data from BME688 sensor failed with: %d", result);
+
+		if (sensor_channel_get(sSensorDev, SENSOR_CHAN_HUMIDITY, &humidity) == 0) {
+			const uint16_t centi = static_cast<uint16_t>(humidity.val1 * 100 + humidity.val2 / 10000);
+			RelativeHumidityMeasurement::Attributes::MeasuredValue::Set(kHumidityEndpointId, centi);
+		}
+
+		/* CO2: the concentration cluster carries a float in the unit we declared (ppm). */
+		if (sensor_channel_get(sSensorDev, SENSOR_CHAN_CO2, &co2) == 0) {
+			const uint16_t ppm = static_cast<uint16_t>(co2.val1);
+			sCo2.SetMeasuredValue(DataModel::Nullable<float>(static_cast<float>(ppm)));
+			sAirQuality.UpdateAirQuality(AirQualityFromCo2(ppm));
+			LOG_DBG("SCD41: %d.%02d C, %d.%02d %%, %u ppm", temperature.val1,
+				temperature.val2 / 10000, humidity.val1, humidity.val2 / 10000, ppm);
+		}
 	}
-#else
-	/* Linear temperature increase that is wrapped around to min value after reaching the max value. */
-	if (mCurrentTemperature < mTemperatureSensorMaxValue) {
-		mCurrentTemperature += kTemperatureMeasurementStep;
-	} else {
-		mCurrentTemperature = mTemperatureSensorMinValue;
-	}
-#endif
+
+	const battery::State bat = battery::read();
+
+	/* Matter counts the battery in half percent. */
+	PowerSource::Attributes::BatPercentRemaining::Set(kPowerSourceEndpointId,
+							  static_cast<uint8_t>(bat.pct * 2));
+	PowerSource::Attributes::BatChargeState::Set(kPowerSourceEndpointId,
+						     bat.charging ? PowerSource::BatChargeStateEnum::kIsCharging
+								  : PowerSource::BatChargeStateEnum::kIsNotCharging);
+	PowerSource::Attributes::BatChargeLevel::Set(kPowerSourceEndpointId,
+						     bat.low ? PowerSource::BatChargeLevelEnum::kCritical
+							     : PowerSource::BatChargeLevelEnum::kOk);
 }
 
-void AppTask::UpdateTemperatureTimeoutCallback(k_timer *timer)
+void AppTask::MeasurementTimeoutCallback(k_timer *timer)
 {
-	if (!timer || !timer->user_data) {
-		return;
-	}
-
-	DeviceLayer::PlatformMgr().ScheduleWork(
-		[](intptr_t p) {
-			AppTask::Instance().UpdateTemperatureMeasurement();
-
-			Protocols::InteractionModel::Status status =
-				Clusters::TemperatureMeasurement::Attributes::MeasuredValue::Set(
-					kTemperatureSensorEndpointId, AppTask::Instance().GetCurrentTemperature());
-
-			if (status != Protocols::InteractionModel::Status::Success) {
-				LOG_ERR("Updating temperature measurement failed %x", to_underlying(status));
-			}
-		},
-		reinterpret_cast<intptr_t>(timer->user_data));
+	/* Cluster attributes may only be touched from the CHIP thread. */
+	DeviceLayer::PlatformMgr().ScheduleWork([](intptr_t) { AppTask::PublishMeasurements(); }, 0);
 }
 
 CHIP_ERROR AppTask::Init()
@@ -202,45 +260,56 @@ CHIP_ERROR AppTask::Init()
 	/* Register Matter event handler that controls the connectivity status LED based on the captured Matter network
 	 * state. */
 	ReturnErrorOnFailure(Nrf::Matter::RegisterEventHandler(Nrf::Board::DefaultMatterEventHandler, 0));
-#ifdef CONFIG_SCD4X
-	if (!device_is_ready(sBme688SensorDev)) {
-		LOG_ERR("BME688 sensor device not ready");
+
+	if (!device_is_ready(sSensorDev)) {
+		LOG_ERR("SCD41 not ready");
 		return chip::System::MapErrorZephyr(-ENODEV);
 	}
-#endif
 
-	ReturnErrorOnFailure(sIdentifyCluster.Init());
+	int err = battery::init();
+	if (err) {
+		LOG_ERR("Battery monitor init failed: %d", err);
+		return chip::System::MapErrorZephyr(err);
+	}
 
-	return Nrf::Matter::StartServer();
+	for (auto &identify : sIdentifyClusters) {
+		ReturnErrorOnFailure(identify.Init());
+	}
+	ReturnErrorOnFailure(Nrf::Matter::StartServer());
+
+	/* Only now. These three reach into the ember endpoint tables, which do not exist until
+	 * Server::Init() has run emberAfEndpointConfigure() -- i.e. until StartServer() returns.
+	 * AirQuality::Instance::Init() asserts on it with VerifyOrDie (a boot-time abort), the
+	 * concentration instance merely returns an error and would then silently never publish.
+	 * The event loop is live by now, so take the stack lock. */
+	PlatformMgr().LockChipStack();
+	err = 0;
+	if (sAirQuality.Init() != CHIP_NO_ERROR || sCo2.Init() != CHIP_NO_ERROR) {
+		err = -EIO;
+	} else {
+		/* Static facts about the source: the SCD41's range, and the endpoints it powers. */
+		sCo2.SetMinMeasuredValue(DataModel::Nullable<float>(kCo2MinPpm));
+		sCo2.SetMaxMeasuredValue(DataModel::Nullable<float>(kCo2MaxPpm));
+		PowerSourceServer::Instance().SetEndpointList(kPowerSourceEndpointId,
+							      Span<EndpointId>(sPoweredEndpoints));
+	}
+	PlatformMgr().UnlockChipStack();
+
+	if (err) {
+		LOG_ERR("Air quality / CO2 cluster init failed");
+		return CHIP_ERROR_INCORRECT_STATE;
+	}
+
+	return CHIP_NO_ERROR;
 }
 
 CHIP_ERROR AppTask::StartApp()
 {
 	ReturnErrorOnFailure(Init());
 
-	DataModel::Nullable<int16_t> val;
-	Protocols::InteractionModel::Status status =
-		Clusters::TemperatureMeasurement::Attributes::MinMeasuredValue::Get(kTemperatureSensorEndpointId, val);
-
-	if (status != Protocols::InteractionModel::Status::Success || val.IsNull()) {
-		LOG_ERR("Failed to get temperature measurement min value %x", to_underlying(status));
-		return CHIP_ERROR_INCORRECT_STATE;
-	}
-
-	mTemperatureSensorMinValue = val.Value();
-
-	status = Clusters::TemperatureMeasurement::Attributes::MaxMeasuredValue::Get(kTemperatureSensorEndpointId, val);
-
-	if (status != Protocols::InteractionModel::Status::Success || val.IsNull()) {
-		LOG_ERR("Failed to get temperature measurement max value %x", to_underlying(status));
-		return CHIP_ERROR_INCORRECT_STATE;
-	}
-
-	mTemperatureSensorMaxValue = val.Value();
-
-	k_timer_init(&mTimer, AppTask::UpdateTemperatureTimeoutCallback, nullptr);
+	k_timer_init(&mTimer, AppTask::MeasurementTimeoutCallback, nullptr);
 	k_timer_user_data_set(&mTimer, this);
-	k_timer_start(&mTimer, K_MSEC(kTemperatureMeasurementIntervalMs), K_MSEC(kTemperatureMeasurementIntervalMs));
+	k_timer_start(&mTimer, K_MSEC(kMeasurementIntervalMs), K_MSEC(kMeasurementIntervalMs));
 #ifndef CONFIG_NCS_SAMPLE_MATTER_USE_DEFAULT_BUTTON_HANDLER
 	k_timer_init(&sBtn1Timer, &ButtonTimerTimeoutCallback, nullptr);
 #endif

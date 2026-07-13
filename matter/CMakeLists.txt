@@ -27,11 +27,15 @@ ncs_get_zap_parent_dir(ZAP_PARENT_DIR)
 target_include_directories(app PRIVATE
   src
   ${ZAP_PARENT_DIR}
+  # AirInk's own source tree, one level up. For now only the battery monitor is shared; the
+  # LVGL e-paper UI follows once the Matter side is settled.
+  ${CMAKE_CURRENT_SOURCE_DIR}/../src
 )
 
 target_sources(app PRIVATE
   src/app_task.cpp
   src/main.cpp
+  ../src/sensors/battery.cpp
 )
 
 ncs_configure_data_model()

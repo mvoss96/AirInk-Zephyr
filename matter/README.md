@@ -9,15 +9,57 @@ memory `matter-zigbee-plan` for the full roadmap.
 
 ## Status (verified on hardware, 2026-07-13)
 
-- **Commissioned into Home Assistant over Thread.** HA shows it as "Matter Temperature
-  Sensor (32768)" with the live SCD41 reading. Both fabrics (the phone's and HA's
+- **Commissioned into Home Assistant over Thread.** Both fabrics (the phone's and HA's
   multi-admin share) commit cleanly.
 - Boots as an **OpenThread Sleepy End Device**, BLE-advertises for commissioning.
   Onboarding: pairing code **`3535-860-0323`**, discriminator 3840, passcode **528722**.
-- Reads the **real SCD41 temperature** (i2c0, P0.22/P0.24) and publishes it to the Matter
-  `TemperatureMeasurement` cluster. Humidity + CO2 clusters are Stage 4 (not yet wired).
-- Footprint: FLASH ~685 KB, **RAM ~187 KB → ~70 KB free** (Debug, 40 KB CHIP heap).
+- Publishes everything the SCD41 measures (i2c0, P0.22/P0.24), plus the battery:
+  temperature, relative humidity, CO2 (ppm), a CO2-derived air quality level, and the
+  PowerSource state. One 30 s tick reads and publishes all of it.
+- Footprint: FLASH ~693 KB, **RAM ~187 KB → ~69 KB free** (Debug, 40 KB CHIP heap). The four
+  extra clusters cost ~400 B of RAM.
 - Console on **uart0 = COM9** (P1.04/P1.06), not the board's USB CDC default.
+
+## Data model (src/default_zap/airink.zap)
+
+| Endpoint | Device type | Clusters | Source |
+|---|---|---|---|
+| 0 | Root Node | PowerSource, ICD Management, Thread/General Diagnostics, … | `battery::read()` |
+| 1 | Temperature Sensor | TemperatureMeasurement | SCD41 |
+| 2 | Humidity Sensor | RelativeHumidityMeasurement | SCD41 |
+| 3 | Air Quality Sensor | AirQuality, CarbonDioxideConcentrationMeasurement | SCD41 |
+
+Derived from NCS's **`matter_weather_station`** ZAP (not `temperature_sensor`): it already has
+PowerSource on the root endpoint and temperature/humidity on their own endpoints. Deltas: its
+pressure endpoint became the air quality endpoint; OTA was removed; its cut-down SIT-only ICD
+Management cluster was swapped for `temperature_sensor`'s full one, which matches the ICD
+features our Kconfig enables (without that, a controller reading `MaximumCheckInBackOff` gets
+an error).
+
+**No OTA.** The stock ZAP carries the OTA Software Update Requestor cluster, but we build
+without OTA (`SB_CONFIG_MATTER_OTA=n`), so nothing ever initialises its attributes -- they sit
+at the ZAP defaults `UpdatePossible=true` / `UpdateState=kUnknown` forever. Home Assistant's
+update entity treats "not kIdle" as *installing*, so the device advertised a phantom firmware
+install that never finished. The cluster is gone from the ZAP.
+
+## Editing the data model
+
+NCS compiles `src/default_zap/zap-generated/` **exactly as checked in** (`BYPASS_IDL`), so
+editing `airink.zap` alone changes nothing. After every ZAP edit run `tools/zap_regen.ps1` and
+commit the regenerated `zap-generated/` + `airink.matter`. It needs the ZAP tool, which NCS
+does not ship -- see the header of that script.
+
+Two traps worth knowing, both of which cost real debugging time here:
+
+- **Cluster instances must be initialised *after* `StartServer()`.** AirQuality and the
+  concentration clusters are not ember-backed; they are `AttributeAccessInterface` instances,
+  and their `Init()` calls `emberAfContainsServer()`, which only works once `Server::Init()`
+  has run `emberAfEndpointConfigure()`. `AirQuality::Instance::Init()` checks this with
+  `VerifyOrDie` -- initialise it too early and the board aborts at boot. The concentration
+  instance only returns an error, and would then silently never publish.
+- **Every code-driven cluster needs one instance per endpoint.** Identify is mandatory for each
+  sensor device type, so it exists on endpoints 1, 2 and 3. Instantiating it for only one leaves
+  the others' attribute reads failing during a controller's interview.
 
 ## Commissioning: the five things that must all be right
 

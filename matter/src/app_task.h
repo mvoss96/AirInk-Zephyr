@@ -26,24 +26,20 @@ public:
 
 	CHIP_ERROR StartApp();
 
-	/* Defined by cluster temperature measured value = 100 x temperature in degC with resolution of
-	 * 0.01 degC. */
-	void UpdateTemperatureMeasurement();
-
-	int16_t GetCurrentTemperature() const { return mCurrentTemperature; }
-
 private:
 	CHIP_ERROR Init();
 	k_timer mTimer;
 
-	static constexpr uint16_t kTemperatureMeasurementIntervalMs = 10000; /* 10 seconds */
-	static constexpr uint16_t kTemperatureMeasurementStep = 100; /* 1 degree Celsius */
+	/* One tick reads the SCD41 (temperature, humidity, CO2) and the battery, then publishes
+	 * all of it. Matches AirInk's own 30 s cycle. The sensor is in periodic mode, so a read
+	 * returns immediately -- unlike AirInk's single-shot path, which blocks ~5 s and would
+	 * stall the CHIP thread this timer's work runs on. */
+	static constexpr uint32_t kMeasurementIntervalMs = 30000;
 
-	static void UpdateTemperatureTimeoutCallback(k_timer *timer);
+	static void MeasurementTimeoutCallback(k_timer *timer);
+
+	/* Runs on the CHIP thread (via ScheduleWork): reads the sensors and writes the clusters. */
+	static void PublishMeasurements();
 
 	static void ButtonEventHandler(Nrf::ButtonState state, Nrf::ButtonMask hasChanged);
-
-	int16_t mTemperatureSensorMaxValue = 0;
-	int16_t mTemperatureSensorMinValue = 0;
-	int16_t mCurrentTemperature = 0;
 };
