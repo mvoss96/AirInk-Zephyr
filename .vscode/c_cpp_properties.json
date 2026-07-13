@@ -1,19 +1,21 @@
 {
-    // One configuration per application (see apps/). Switch with the picker in the status bar,
-    // or via "C/C++: Select a Configuration...".
+    // One configuration per application (see apps/). Switch with the picker in the status bar, or
+    // via "C/C++: Select a Configuration...".
     //
     // compileCommands gives IntelliSense the real include paths and defines, so Zephyr headers
-    // resolve; forcedInclude pulls in the generated autoconf.h, so CONFIG_* symbols are defined
-    // and the "#warning ... must be enabled by CONFIG_X" guards stop firing. Both point INTO a
-    // build directory -- the paths below assume tools/flash.ps1's layout (build/<app>), so build
-    // once before expecting IntelliSense to work.
+    // resolve; forcedInclude pulls in the generated autoconf.h, so CONFIG_* symbols are defined and
+    // the "#warning ... must be enabled by CONFIG_X" guards stop firing.
+    //
+    // Both point INTO a build directory: <app>/build/<app>/. That is where the nRF Connect
+    // extension builds by default, and tools/flash.ps1 was pointed at the same place. Build the
+    // application once before expecting IntelliSense to work in it.
     "configurations": [
         {
             "name": "Zephyr (standalone)",
-            "compileCommands": "${workspaceFolder}/build/standalone/standalone/compile_commands.json",
+            "compileCommands": "${workspaceFolder}/apps/standalone/build/standalone/compile_commands.json",
             "compilerPath": "C:/ncs/toolchains/dcbdc366a1/opt/zephyr-sdk/gnu/arm-zephyr-eabi/bin/arm-zephyr-eabi-gcc.exe",
             "forcedInclude": [
-                "${workspaceFolder}/build/standalone/standalone/zephyr/include/generated/zephyr/autoconf.h"
+                "${workspaceFolder}/apps/standalone/build/standalone/zephyr/include/generated/zephyr/autoconf.h"
             ],
             "cStandard": "c11",
             "cppStandard": "c++17",
@@ -21,10 +23,10 @@
         },
         {
             "name": "Zephyr (matter)",
-            "compileCommands": "${workspaceFolder}/build/matter/matter/compile_commands.json",
+            "compileCommands": "${workspaceFolder}/apps/matter/build/matter/compile_commands.json",
             "compilerPath": "C:/ncs/toolchains/dcbdc366a1/opt/zephyr-sdk/gnu/arm-zephyr-eabi/bin/arm-zephyr-eabi-gcc.exe",
             "forcedInclude": [
-                "${workspaceFolder}/build/matter/matter/zephyr/include/generated/zephyr/autoconf.h"
+                "${workspaceFolder}/apps/matter/build/matter/zephyr/include/generated/zephyr/autoconf.h"
             ],
             "cStandard": "c11",
             "cppStandard": "c++17",

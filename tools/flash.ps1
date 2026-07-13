@@ -33,7 +33,10 @@ param(
 $ErrorActionPreference = "Stop"
 $root     = Split-Path $PSScriptRoot -Parent
 $appDir   = Join-Path $root "apps\$App"
-$buildDir = Join-Path $root "build\$App"
+# Same build directory the nRF Connect VS Code extension uses (<app>/build), so the two do not
+# maintain separate trees -- and so IntelliSense (.vscode/c_cpp_properties.json) finds the
+# compile_commands.json whichever way you built.
+$buildDir = Join-Path $appDir "build"
 
 if ($Build) {
   $tc = "C:\ncs\toolchains\dcbdc366a1"

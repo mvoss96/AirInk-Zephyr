@@ -31,9 +31,13 @@ repo root was itself an application, and that was invisible.
 ## Building
 
 ```
-west build -b promicro_nrf52840/nrf52840 apps/standalone -d build/standalone
-west build -b promicro_nrf52840/nrf52840 apps/matter     -d build/matter
+west build -b promicro_nrf52840/nrf52840 apps/standalone -d apps/standalone/build
+west build -b promicro_nrf52840/nrf52840 apps/matter     -d apps/matter/build
 ```
+
+`<app>/build` is where the nRF Connect VS Code extension builds by default, so the command line and
+the IDE share one tree — and `.vscode/c_cpp_properties.json` finds `compile_commands.json` either
+way. Build an application once before expecting IntelliSense to work in it.
 
 Or, with the flash helper (J-Link over SWD, then streams the console):
 
@@ -46,9 +50,12 @@ Build for the **plain** board target, never `promicro_nrf52840/nrf52840/uf2`: th
 at 0x1000, where the Adafruit UF2 bootloader expects a SoftDevice-less app. The `/uf2` variant links
 at 0x26000 and will not boot. Both builds also emit a `.uf2` for drag-drop flashing.
 
-In VS Code (nRF Connect), add both `apps/standalone` and `apps/matter` as applications; each gets
-its own build configuration. `.vscode/c_cpp_properties.json` has an IntelliSense configuration for
-each — pick one in the status bar.
+In VS Code (nRF Connect): **Applications → Add an existing application**, once for `apps/standalone`
+and once for `apps/matter`. Then **Add build configuration** on each, board `promicro_nrf52840/nrf52840`,
+build directory `build`, sysbuild on (the Matter app does not build without it). The toolchain must
+be the NCS v3.4.0 one (`dcbdc366a1`) — an older one fails with `FindZephyr-sdk ... not compatible
+with requested version "1.0"`. `.vscode/c_cpp_properties.json` has an IntelliSense configuration per
+application; pick one in the status bar.
 
 Day to day: do UI and sensor work in the standalone build, which compiles in seconds. The Matter
 build takes minutes, and the code is the same.

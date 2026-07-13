@@ -17,5 +17,9 @@
     // Render the hints smaller and with a little breathing room, so they read as
     // annotations rather than as code.
     "editor.inlayHints.fontSize": 11,
-    "editor.inlayHints.padding": true
+    "editor.inlayHints.padding": true,
+    "nrf-connect.applications": [
+        "${workspaceFolder}\\apps\\standalone",
+        "${workspaceFolder}\\apps\\matter"
+    ]
 }
