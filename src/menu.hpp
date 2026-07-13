@@ -12,17 +12,29 @@
  * every other view.
  *
  * A failed calibration is the menu's own business: it puts the message up and waits for
- * the user to acknowledge it, so main never learns that one happened.
+ * the user to acknowledge it, so the loop never learns that one happened.
  *
  *   enter()                      the user held the button on the sensor view
  *   proceed(gesture)  -> Running the user is still in here
  *                     -> Exited  put the readings back on screen
  *
- * Root --hold(Calibrate)--> CalibPrompt --hold--> CalibRun --3 min--> Recalibrated
- *  | tap = next entry            | tap = Exited        | hold = Exited (aborts)
- *  | hold(Exit) / 30 s idle = Exited                   | sensor said no
- *                                                      v
- *                                        CalibFailed --any gesture / 30 s idle--> Exited
+ * Every screen below Root goes back TO Root, never straight out: the user came from the menu and
+ * may well want the next entry. Only Exit and Root's own idle timeout leave the menu -- and a
+ * finished recalibration, which is a completion rather than a way back.
+ *
+ * Root --hold(Calibrate)-----> CalibPrompt --hold--> CalibRun --3 min--> Recalibrated
+ *  |  tap = next entry              | tap / 2 min idle    | hold = abort      (leaves the menu)
+ *  |                                v                     v                sensor said no
+ *  |                              Root                  Root                     v
+ *  |                                                                       CalibFailed
+ *  |                                                                     any gesture / idle
+ *  |                                                                             v
+ *  |                                                                           Root
+ *  |-hold(Matter)-------------> Matter ------any gesture / 2 min idle---------> Root
+ *  |-hold(Factory reset)------> ResetPrompt --tap / 30 s idle-----------------> Root
+ *  |                                | hold = FactoryReset (the loop's hook reboots us)
+ *  |
+ *  |-hold(Exit) / 30 s idle ---> Exited
  */
 namespace menu
 {

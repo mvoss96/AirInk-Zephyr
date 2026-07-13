@@ -252,15 +252,16 @@ menu::Status menu::proceed(button::Event e)
 		}
 		if (e == button::Event::Short || now >= idle_at)
 		{
-			return Status::Exited;
+			to_root();
 		}
 		return Status::Running;
 
 	case State::CalibRun:
 		if (e == button::Event::Long)
 		{
-			abort();
-			return Status::Exited;
+			abort();   // takes the sensor back out of periodic mode
+			to_root(); // ... and the user back to the menu they came from
+			return Status::Running;
 		}
 		if (now >= calib_end_at)
 		{
@@ -279,12 +280,16 @@ menu::Status menu::proceed(button::Event e)
 		return Status::Running;
 
 	case State::CalibFailed:
-		return (e != button::Event::None || now >= idle_at) ? Status::Exited : Status::Running;
+		if (e != button::Event::None || now >= idle_at)
+		{
+			to_root();
+		}
+		return Status::Running;
 
 	case State::Matter:
-		// Nothing is being decided here, so any gesture takes the user back to the menu they came
-		// from -- and so does the idle timeout, because an onboarding code left on an e-paper panel
-		// is a code left on display. (The menu's own idle timeout then closes it soon after.)
+		// An onboarding code left on an e-paper panel is a code left on display, so the idle
+		// timeout matters here as much as the gesture -- and both go back to the menu, whose own
+		// timeout then closes it soon after.
 		if (e != button::Event::None || now >= idle_at)
 		{
 			to_root();
@@ -297,7 +302,11 @@ menu::Status menu::proceed(button::Event e)
 			printk("[UI] factory reset confirmed\n");
 			return Status::FactoryReset;
 		}
-		return (e != button::Event::None || now >= idle_at) ? Status::Exited : Status::Running;
+		if (e != button::Event::None || now >= idle_at)
+		{
+			to_root();
+		}
+		return Status::Running;
 	}
 	return Status::Exited; // unreachable; a new state must be handled above
 }
