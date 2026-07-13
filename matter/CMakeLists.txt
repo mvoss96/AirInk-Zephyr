@@ -11,6 +11,10 @@ cmake_minimum_required(VERSION 3.20.0)
 # too, or the e-paper node's width/height properties silently do not exist.
 list(APPEND DTS_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/..)
 
+# The board's drivers, shared with the standalone firmware. Merged after prj.conf, so keep it free
+# of anything an app would want to override -- see the file's header.
+list(APPEND EXTRA_CONF_FILE ${CMAKE_CURRENT_SOURCE_DIR}/../conf/airink_hw.conf)
+
 find_package(Zephyr HINTS $ENV{ZEPHYR_BASE})
 
 project(matter-temperature-sensor)

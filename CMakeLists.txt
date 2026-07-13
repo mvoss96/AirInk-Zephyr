@@ -1,4 +1,9 @@
 cmake_minimum_required(VERSION 3.20.0)
+
+# The board's drivers, shared with the Matter build (which appends the same file). Merged after
+# prj.conf, so keep it free of anything an app would want to override -- see the file's header.
+list(APPEND EXTRA_CONF_FILE ${CMAKE_CURRENT_SOURCE_DIR}/conf/airink_hw.conf)
+
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 
 project(AirInk)
