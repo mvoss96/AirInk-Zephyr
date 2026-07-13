@@ -568,11 +568,7 @@ namespace
 
 		lv_obj_t *title = make_label(reset_root, &b612_28, CONTENT_W);
 		lv_label_set_text(title, "FACTORY RESET");
-		lv_obj_align(title, LV_ALIGN_CENTER, 0, -60);
-
-		lv_obj_t *body = make_label(reset_root, &b612_16, CONTENT_W - 60);
-		lv_label_set_text(body, "This removes the device from your\nnetwork. You will have to pair it again.");
-		lv_obj_align(body, LV_ALIGN_CENTER, 0, 5);
+		lv_obj_align(title, LV_ALIGN_CENTER, 0, -10);
 
 		// Tap is the reflex, so tap is the harmless one. Same rule as the calibration prompt.
 		lv_obj_t *hint = make_label(reset_root, &b612_16, CONTENT_W);

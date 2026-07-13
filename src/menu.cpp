@@ -84,9 +84,21 @@ namespace
 		return e;
 	}
 
+	/** Back to the list of entries, with the cursor where the user left it.
+	 *
+	 * A screen that only informs -- the Matter one -- returns here rather than dropping the user
+	 * out to the readings: they came from the menu, and they may well want the next entry.
+	 */
+	void to_root()
+	{
+		go(State::Root);
+		idle_at = k_uptime_get() + MENU_IDLE_MS;
+		ui::set_menu(cursor);
+	}
+
 	/** The Matter screen: the QR while there is something to scan, the state once there is not.
 	 *
-	 * It only ever tells you something, so any gesture dismisses it. Leaving the network is a
+	 * It only ever tells you something, so any gesture takes you back. Leaving the network is a
 	 * menu entry of its own -- not a gesture hidden on a screen that reads like a status line.
 	 */
 	void to_matter()
@@ -270,9 +282,14 @@ menu::Status menu::proceed(button::Event e)
 		return (e != button::Event::None || now >= idle_at) ? Status::Exited : Status::Running;
 
 	case State::Matter:
-		// Nothing is being decided here, so any gesture dismisses it -- and so does the idle
-		// timeout, because an onboarding code left on an e-paper panel is a code left on display.
-		return (e != button::Event::None || now >= idle_at) ? Status::Exited : Status::Running;
+		// Nothing is being decided here, so any gesture takes the user back to the menu they came
+		// from -- and so does the idle timeout, because an onboarding code left on an e-paper panel
+		// is a code left on display. (The menu's own idle timeout then closes it soon after.)
+		if (e != button::Event::None || now >= idle_at)
+		{
+			to_root();
+		}
+		return Status::Running;
 
 	case State::ResetPrompt:
 		if (e == button::Event::Long)
