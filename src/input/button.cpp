@@ -5,6 +5,7 @@
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
 #include <zephyr/input/input.h>
+#include <zephyr/pm/device_runtime.h>
 
 namespace
 {
@@ -66,7 +67,33 @@ namespace
 
 int button::init()
 {
-	return device_is_ready(btn_dev) ? 0 : -ENODEV;
+	if (!device_is_ready(btn_dev))
+	{
+		return -ENODEV;
+	}
+
+	/* Claim the button, and never let go.
+	 *
+	 * gpio-keys registers itself with device runtime PM in its own init (input_gpio_keys.c calls
+	 * pm_device_runtime_enable), and enabling runtime PM *suspends* the device on the spot --
+	 * whose suspend action is gpio_pin_interrupt_configure_dt(GPIO_INT_DISABLE). So with
+	 * CONFIG_PM_DEVICE_RUNTIME the button interrupt is off from boot, silently, until somebody
+	 * says they want it. That is the driver's design: a button costs current (pull-up), so it is
+	 * the application that decides whether it is worth having.
+	 *
+	 * We always want it: the panel's only input is this one button. So take a reference here and
+	 * hold it for the life of the device -- there is no matching put(), on purpose.
+	 *
+	 * (No-op when runtime PM is off; the header stubs it out.)
+	 */
+	const int err = pm_device_runtime_get(btn_dev);
+	if (err < 0)
+	{
+		printk("Button: could not resume gpio-keys (%d); the button will not report\n", err);
+		return err;
+	}
+
+	return 0;
 }
 
 button::Event button::wait_until(int64_t deadline_ms)
