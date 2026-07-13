@@ -25,22 +25,28 @@ memory `matter-zigbee-plan` for the full roadmap.
 | Endpoint | Device type | Clusters | Source |
 |---|---|---|---|
 | 0 | Root Node | PowerSource, ICD Management, Thread/General Diagnostics, … | `battery::read()` |
-| 1 | Temperature Sensor | TemperatureMeasurement | SCD41 |
-| 2 | Humidity Sensor | RelativeHumidityMeasurement | SCD41 |
-| 3 | Air Quality Sensor | AirQuality, CarbonDioxideConcentrationMeasurement | SCD41 |
+| 1 | Air Quality Sensor | AirQuality, CarbonDioxideConcentration, TemperatureMeasurement, RelativeHumidityMeasurement | SCD41 |
 
-Derived from NCS's **`matter_weather_station`** ZAP (not `temperature_sensor`): it already has
-PowerSource on the root endpoint and temperature/humidity on their own endpoints. Deltas: its
-pressure endpoint became the air quality endpoint; OTA was removed; its cut-down SIT-only ICD
-Management cluster was swapped for `temperature_sensor`'s full one, which matches the ICD
-features our Kconfig enables (without that, a controller reading `MaximumCheckInBackOff` gets
-an error).
+**One physical sensor, one endpoint.** The Air Quality Sensor device type (0x002C) may carry
+temperature and humidity alongside the CO2 clusters, so everything the SCD41 measures lives on
+endpoint 1. Splitting them across a temperature, a humidity and an air quality endpoint also
+works — but each sensor device type *mandates* its own Identify cluster, and a controller then
+shows three "Identify" entities for one device.
 
-**No OTA.** The stock ZAP carries the OTA Software Update Requestor cluster, but we build
-without OTA (`SB_CONFIG_MATTER_OTA=n`), so nothing ever initialises its attributes -- they sit
-at the ZAP defaults `UpdatePossible=true` / `UpdateState=kUnknown` forever. Home Assistant's
-update entity treats "not kIdle" as *installing*, so the device advertised a phantom firmware
-install that never finished. The cluster is gone from the ZAP.
+Derived from NCS's **`matter_weather_station`** ZAP (not `temperature_sensor`): it is NCS-native,
+so the root endpoint carries the ICD/Thread clusters an SED build needs, and it already has
+PowerSource and a humidity cluster to lift. Deltas:
+
+- **OTA dropped.** The stock ZAP carries the OTA Software Update Requestor cluster, but we build
+  without OTA (`SB_CONFIG_MATTER_OTA=n`), so nothing ever initialises its attributes — they sit
+  at the ZAP defaults `UpdatePossible=true` / `UpdateState=kUnknown` forever. Home Assistant's
+  update entity treats "not kIdle" as *installing*, so the device advertised a phantom firmware
+  install that could never finish.
+- **ICD Management swapped** for `temperature_sensor`'s full cluster. The weather station is a
+  plain SIT ICD and ships a cut-down one; our Kconfig enables the LIT/CIP/UAT features, so a
+  controller reading `MaximumCheckInBackOff` was getting an error.
+- **`BatVoltage` and `BatTimeRemaining` dropped.** `battery.cpp` deliberately does not expose the
+  cell voltage and we do not estimate runtime, so both would report a permanent 0.
 
 ## Editing the data model
 

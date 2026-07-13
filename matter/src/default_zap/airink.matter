@@ -2112,9 +2112,7 @@ endpoint 0 {
     ram      attribute status;
     ram      attribute order default = 0;
     ram      attribute description default = "Primary Battery";
-    ram      attribute batVoltage;
     ram      attribute batPercentRemaining;
-    ram      attribute batTimeRemaining;
     ram      attribute batChargeLevel;
     ram      attribute batReplacementNeeded default = 0;
     ram      attribute batReplaceability default = 0;
@@ -2378,84 +2376,6 @@ endpoint 0 {
   }
 }
 endpoint 1 {
-  device type ma_tempsensor = 770, version 2;
-
-
-  server cluster Identify {
-    callback attribute identifyTime;
-    callback attribute identifyType;
-    callback attribute generatedCommandList;
-    callback attribute acceptedCommandList;
-    callback attribute attributeList;
-    callback attribute featureMap;
-    callback attribute clusterRevision;
-
-    handle command Identify;
-  }
-
-  server cluster Descriptor {
-    callback attribute deviceTypeList;
-    callback attribute serverList;
-    callback attribute clientList;
-    callback attribute partsList;
-    callback attribute generatedCommandList;
-    callback attribute acceptedCommandList;
-    callback attribute attributeList;
-    callback attribute featureMap;
-    callback attribute clusterRevision;
-  }
-
-  server cluster TemperatureMeasurement {
-    ram      attribute measuredValue;
-    ram      attribute minMeasuredValue default = -4000;
-    ram      attribute maxMeasuredValue default = 8500;
-    callback attribute generatedCommandList;
-    callback attribute acceptedCommandList;
-    callback attribute attributeList;
-    ram      attribute featureMap default = 0;
-    ram      attribute clusterRevision default = 4;
-  }
-}
-endpoint 2 {
-  device type ma_humiditysensor = 775, version 2;
-
-
-  server cluster Identify {
-    callback attribute identifyTime;
-    callback attribute identifyType;
-    callback attribute generatedCommandList;
-    callback attribute acceptedCommandList;
-    callback attribute attributeList;
-    callback attribute featureMap;
-    callback attribute clusterRevision;
-
-    handle command Identify;
-  }
-
-  server cluster Descriptor {
-    callback attribute deviceTypeList;
-    callback attribute serverList;
-    callback attribute clientList;
-    callback attribute partsList;
-    callback attribute generatedCommandList;
-    callback attribute acceptedCommandList;
-    callback attribute attributeList;
-    callback attribute featureMap;
-    callback attribute clusterRevision;
-  }
-
-  server cluster RelativeHumidityMeasurement {
-    ram      attribute measuredValue;
-    ram      attribute minMeasuredValue default = 0;
-    ram      attribute maxMeasuredValue default = 10000;
-    callback attribute generatedCommandList;
-    callback attribute acceptedCommandList;
-    callback attribute attributeList;
-    ram      attribute featureMap default = 0;
-    ram      attribute clusterRevision default = 3;
-  }
-}
-endpoint 3 {
   device type ma_air_quality_sensor = 44, version 1;
 
 
@@ -2490,6 +2410,28 @@ endpoint 3 {
     callback attribute attributeList;
     callback attribute featureMap;
     ram      attribute clusterRevision default = 1;
+  }
+
+  server cluster TemperatureMeasurement {
+    ram      attribute measuredValue;
+    ram      attribute minMeasuredValue default = -4000;
+    ram      attribute maxMeasuredValue default = 8500;
+    callback attribute generatedCommandList;
+    callback attribute acceptedCommandList;
+    callback attribute attributeList;
+    ram      attribute featureMap default = 0;
+    ram      attribute clusterRevision default = 4;
+  }
+
+  server cluster RelativeHumidityMeasurement {
+    ram      attribute measuredValue;
+    ram      attribute minMeasuredValue default = 0;
+    ram      attribute maxMeasuredValue default = 10000;
+    callback attribute generatedCommandList;
+    callback attribute acceptedCommandList;
+    callback attribute attributeList;
+    ram      attribute featureMap default = 0;
+    ram      attribute clusterRevision default = 3;
   }
 
   server cluster CarbonDioxideConcentrationMeasurement {

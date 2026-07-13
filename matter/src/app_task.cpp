@@ -31,40 +31,34 @@ using namespace ::chip::app::Clusters;
 
 namespace
 {
-/* Endpoint map -- see src/default_zap/airink.zap. Each sensor gets its own endpoint because
- * each is its own Matter device type; a controller then lists three sensors under one node. */
+/* Endpoint map -- see src/default_zap/airink.zap. One physical sensor, one endpoint: the Air
+ * Quality Sensor device type may carry temperature and humidity alongside the CO2 clusters, so
+ * everything the SCD41 measures lives on endpoint 1. (Splitting it into a temperature, humidity
+ * and air quality endpoint also works, but each device type mandates its own Identify cluster,
+ * and a controller then shows three "Identify" entities for one device.) */
 constexpr EndpointId kPowerSourceEndpointId = 0; /* root node */
-constexpr EndpointId kTemperatureEndpointId = 1;
-constexpr EndpointId kHumidityEndpointId = 2;
-constexpr EndpointId kAirQualityEndpointId = 3; /* AirQuality + CO2 concentration */
+constexpr EndpointId kSensorEndpointId = 1;
 
-/* The battery on endpoint 0 powers everything on the node. */
-EndpointId sPoweredEndpoints[] = { 0, 1, 2, 3 };
+/* The battery powers the whole node. */
+EndpointId sPoweredEndpoints[] = { 0, 1 };
 
 const device *sSensorDev = DEVICE_DT_GET(DT_NODELABEL(scd41));
 
-/* Identify is mandatory for each sensor device type, so the ZAP puts it on all three sensor
- * endpoints -- and it is code-driven, so each one needs its own server instance. Miss one and
- * a controller's read of that endpoint's Identify attributes fails during the interview. */
-Nrf::Matter::IdentifyCluster sIdentifyClusters[] = {
-	Nrf::Matter::IdentifyCluster(kTemperatureEndpointId),
-	Nrf::Matter::IdentifyCluster(kHumidityEndpointId),
-	Nrf::Matter::IdentifyCluster(kAirQualityEndpointId),
-};
+Nrf::Matter::IdentifyCluster sIdentifyCluster(kSensorEndpointId);
 
 /* Unlike temperature and humidity, the air quality and concentration clusters are not backed
  * by the ember attribute store -- they are served by these AttributeAccessInterface instances,
  * which is why the ZAP marks their attributes "External". The concentration template flags are
  * <Numeric, Level, MediumLevel, CriticalLevel, Peak, Average>: we report a numeric ppm value
  * and nothing else, and the ZAP's attribute list must match that exactly. */
-AirQuality::Instance sAirQuality(kAirQualityEndpointId,
+AirQuality::Instance sAirQuality(kSensorEndpointId,
 				 BitMask<AirQuality::Feature, uint32_t>(AirQuality::Feature::kModerate,
 									AirQuality::Feature::kFair,
 									AirQuality::Feature::kVeryPoor,
 									AirQuality::Feature::kExtremelyPoor));
 
 ConcentrationMeasurement::Instance<true, false, false, false, false, false>
-	sCo2(kAirQualityEndpointId, CarbonDioxideConcentrationMeasurement::Id,
+	sCo2(kSensorEndpointId, CarbonDioxideConcentrationMeasurement::Id,
 	     ConcentrationMeasurement::MeasurementMediumEnum::kAir,
 	     ConcentrationMeasurement::MeasurementUnitEnum::kPpm);
 
@@ -210,12 +204,12 @@ void AppTask::PublishMeasurements()
 		 * /10000 lands on the same scale. Humidity is centi-percent, same arithmetic. */
 		if (sensor_channel_get(sSensorDev, SENSOR_CHAN_AMBIENT_TEMP, &temperature) == 0) {
 			const int16_t centi = static_cast<int16_t>(temperature.val1 * 100 + temperature.val2 / 10000);
-			TemperatureMeasurement::Attributes::MeasuredValue::Set(kTemperatureEndpointId, centi);
+			TemperatureMeasurement::Attributes::MeasuredValue::Set(kSensorEndpointId, centi);
 		}
 
 		if (sensor_channel_get(sSensorDev, SENSOR_CHAN_HUMIDITY, &humidity) == 0) {
 			const uint16_t centi = static_cast<uint16_t>(humidity.val1 * 100 + humidity.val2 / 10000);
-			RelativeHumidityMeasurement::Attributes::MeasuredValue::Set(kHumidityEndpointId, centi);
+			RelativeHumidityMeasurement::Attributes::MeasuredValue::Set(kSensorEndpointId, centi);
 		}
 
 		/* CO2: the concentration cluster carries a float in the unit we declared (ppm). */
@@ -272,9 +266,7 @@ CHIP_ERROR AppTask::Init()
 		return chip::System::MapErrorZephyr(err);
 	}
 
-	for (auto &identify : sIdentifyClusters) {
-		ReturnErrorOnFailure(identify.Init());
-	}
+	ReturnErrorOnFailure(sIdentifyCluster.Init());
 	ReturnErrorOnFailure(Nrf::Matter::StartServer());
 
 	/* Only now. These three reach into the ember endpoint tables, which do not exist until
