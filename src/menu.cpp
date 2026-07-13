@@ -1,5 +1,7 @@
 #include "menu.hpp"
 
+#include "app.hpp"
+
 #include <stdint.h>
 #include <zephyr/kernel.h>
 
@@ -65,18 +67,30 @@ namespace
 		state = next;
 	}
 
-	/** Advance the cursor to the next entry this build actually has.
+	/** Can the cursor stop here?
 	 *
-	 * A build with no radio has no Pairing entry -- it is not drawn, so the cursor must not
-	 * stop on it either, or a tap would appear to do nothing.
+	 * Two reasons it cannot. The entry may not exist at all -- a build with no radio has no
+	 * Matter row, and it is not drawn. Or it may exist but have nothing behind it: once the
+	 * device is on a fabric the Matter row still says so, but there is no longer a code to
+	 * scan, so it stops being a way in and becomes a statement of fact. Either way the cursor
+	 * must skip it, or a hold would appear to do nothing.
 	 */
+	bool selectable(ui::Menu e)
+	{
+		if (!ui::menu_has(e))
+		{
+			return false;
+		}
+		return !(e == ui::Menu::Pairing && app::commissioned());
+	}
+
 	ui::Menu next_entry(ui::Menu from)
 	{
 		ui::Menu e = from;
 		do
 		{
 			e = (ui::Menu)(((int)e + 1) % (int)ui::Menu::Count);
-		} while (!ui::menu_has(e) && e != from);
+		} while (!selectable(e) && e != from);
 		return e;
 	}
 

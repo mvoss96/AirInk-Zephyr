@@ -25,6 +25,9 @@
 // No logging / asserts noise for the one-shot render.
 #define LV_USE_LOG 0
 
+/* The onboarding QR (ui::show_pairing). Matches conf/airink_hw.conf on the device. */
+#define LV_USE_QRCODE 1
+
 // UI fonts are custom (B612/DSEG7 from sim/fonts/); only need a built-in default
 // font, which is never shown. Tiny UNSCII-8, matching prj.conf.
 #define LV_FONT_UNSCII_8 1

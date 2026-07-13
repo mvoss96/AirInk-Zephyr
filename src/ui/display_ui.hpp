@@ -64,10 +64,20 @@ namespace ui
 	/** Whether a menu entry exists in this build. See Menu. */
 	bool menu_has(Menu entry);
 
-	/** Select the pairing view: the QR code and the manual code given to init().
+	/** Select the pairing view: the QR and the manual code given to init().
 	 * A no-op when init() was given none.
 	 */
 	void show_pairing();
+
+	/** Stage what the menu's Matter row says.
+	 *
+	 * Once the device is on a fabric there is nothing to scan, so the row stops being a way in
+	 * and becomes a statement of fact. The caller stops letting the cursor land on it (see
+	 * menu_has()); this only changes the words.
+	 *
+	 * @param commissioned whether the device is already on a fabric
+	 */
+	void set_matter_status(bool commissioned);
 
 	/** Stage the battery indicator, shown on every view.
 	 *

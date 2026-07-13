@@ -53,6 +53,17 @@ namespace app
 	 */
 	void set_pairing_codes(const char *qr, const char *manual);
 
+	/** Whether the device is already on a Matter fabric, from any thread.
+	 *
+	 * The Matter view asks: while there is still something to scan it shows the QR, and once the
+	 * device is on a fabric there is nothing to scan, so it says so instead. Recorded here rather
+	 * than queried, because the panel belongs to run()'s thread and the fabric table does not.
+	 *
+	 * Always false in a build with no radio -- which never shows the view anyway.
+	 */
+	void set_commissioned(bool on_fabric);
+	bool commissioned();
+
 	/** Report the radio state for the status bar, from any thread.
 	 *
 	 * Only records the value -- the panel belongs to run()'s thread, which puts it up on

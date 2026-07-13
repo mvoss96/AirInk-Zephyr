@@ -19,6 +19,7 @@
 #include <app/clusters/air-quality-server/air-quality-server.h>
 #include <app/clusters/concentration-measurement-server/concentration-measurement-server.h>
 #include <app/clusters/power-source-server/power-source-server.h>
+#include <app/server/Server.h>
 #include <setup_payload/OnboardingCodesUtil.h>
 #include <setup_payload/QRCodeSetupPayloadGenerator.h>
 
@@ -122,6 +123,16 @@ void PublishBattery(const battery::State &bat)
 	PowerSource::Attributes::BatChargeLevel::Set(kPowerSourceEndpointId,
 						     bat.low ? PowerSource::BatChargeLevelEnum::kCritical
 							     : PowerSource::BatChargeLevelEnum::kOk);
+
+	/* Riding along, because this is the one place that already holds the lock on AirInk's own
+	 * thread: whether we are on a fabric, which is what decides if the menu's Matter row is a way
+	 * in to the QR or a statement of fact.
+	 *
+	 * Polled rather than driven by an event, because there is no event for a fabric being
+	 * *removed* -- CHIP only signals kCommissioningComplete. The table is the truth, and this runs
+	 * on every wake of the loop, so the flag is fresh by the time the menu opens (the loop calls
+	 * this hook before it acts on the button). */
+	::app::set_commissioned(Server::GetInstance().GetFabricTable().FabricCount() > 0);
 	PlatformMgr().UnlockChipStack();
 }
 
@@ -149,6 +160,25 @@ void MatterEventHandler(const ChipDeviceEvent *event, intptr_t)
  * copy them and the UI holds the pointers for the life of the device. */
 char sQrCode[chip::QRCodeBasicSetupPayloadGenerator::kMaxQRCodeBase38RepresentationLength + 1];
 char sManualCode[chip::kManualSetupLongCodeCharLength + 1];
+char sManualCodePretty[sizeof(sManualCode) + 2]; /* room for the two dashes */
+
+/* CHIP hands the manual code back as bare digits ("35358600323"), which is what a controller
+ * wants to parse but not what a human wants to type: eleven undifferentiated digits are read
+ * wrong. Every controller UI groups them 4-3-4, so group them here too.
+ *
+ * Only the 11-digit short code is grouped -- the 21-digit long code (VID/PID embedded) has its
+ * own layout, and we do not generate it. Anything unexpected is passed through unchanged rather
+ * than mangled.
+ */
+const char *GroupManualCode(const char *digits)
+{
+	if (strlen(digits) != 11) {
+		return digits;
+	}
+	snprintf(sManualCodePretty, sizeof(sManualCodePretty), "%.4s-%.3s-%.4s", digits, digits + 4,
+		 digits + 7);
+	return sManualCodePretty;
+}
 
 /* What a controller needs to find and authenticate this device -- the same payload the sample
  * prints to the log at boot, but printed on the e-paper, where the user actually is. It does not
@@ -165,7 +195,7 @@ void FetchOnboardingCodes()
 		return;
 	}
 
-	::app::set_pairing_codes(sQrCode, sManualCode);
+	::app::set_pairing_codes(sQrCode, GroupManualCode(sManualCode));
 }
 
 void AirInkThread(void *, void *, void *)
@@ -212,8 +242,10 @@ CHIP_ERROR AppTask::StartApp()
 	ReturnErrorOnFailure(Init());
 
 	/* Before the thread starts: app::run() reads the codes when it builds the UI, and whether
-	 * there are any is what decides that the menu has a pairing entry at all. */
+	 * there are any is what decides that the menu has a Matter row at all. The fabric table has
+	 * been loaded from NVS by now, so this is the state a reboot comes back to. */
 	FetchOnboardingCodes();
+	::app::set_commissioned(Server::GetInstance().GetFabricTable().FabricCount() > 0);
 
 	k_thread_create(&sAirInkThread, sAirInkStack, K_THREAD_STACK_SIZEOF(sAirInkStack), AirInkThread,
 			nullptr, nullptr, nullptr, K_PRIO_PREEMPT(10), 0, K_NO_WAIT);

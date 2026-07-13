@@ -82,7 +82,10 @@ int main()
 	lv_display_set_buffers(disp, buf, nullptr, sizeof(buf), LV_DISPLAY_RENDER_MODE_FULL);
 	lv_display_set_flush_cb(disp, flush_cb);
 
-	if (ui::init() != 0)
+	/* The onboarding codes the Matter build hands to ui::init(): a real payload from the
+	 * device, so the QR in the mockup is the QR on the panel. Passing them is also what makes
+	 * the menu grow its Matter entry -- a build with no radio gets neither. */
+	if (ui::init("MT:M1TJ342C00KA0648G00", "3535-860-0323") != 0)
 	{
 		std::printf("ui::init failed\n");
 		return 1;
@@ -126,9 +129,29 @@ int main()
 	snapshot("menu");
 
 	g_tick_ms += 100;
-	ui::set_menu(ui::Menu::Exit); // one tap moves the cursor
+	ui::set_menu(ui::Menu::Pairing); // one tap moves the cursor
+	ui::refresh();
+	snapshot("menu_pairing");
+
+	g_tick_ms += 100;
+	ui::set_menu(ui::Menu::Exit);
 	ui::refresh();
 	snapshot("menu_exit");
+
+	// The Matter row, both ways. Uncommissioned it is a way in to the QR; once on a fabric it
+	// says so and the cursor skips it (menu.cpp), which is why the highlight sits on Exit.
+	g_tick_ms += 100;
+	ui::set_link(ui::Link::BleAdv);
+	ui::show_pairing();
+	ui::refresh();
+	snapshot("matter_pairing");
+
+	g_tick_ms += 100;
+	ui::set_link(ui::Link::ThreadConnected);
+	ui::set_matter_status(/*commissioned=*/true);
+	ui::set_menu(ui::Menu::Exit);
+	ui::refresh();
+	snapshot("menu_matter_connected");
 
 	g_tick_ms += 100;
 	ui::set_calib_prompt();

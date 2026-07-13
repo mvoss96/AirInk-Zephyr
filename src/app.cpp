@@ -26,6 +26,7 @@ static const char *pair_manual;
 // Written by any thread, read by the loop. A plain enum store is atomic on this core, and
 // a stale read costs nothing worse than one cycle of a stale indicator.
 static ui::Link link_state = ui::Link::None;
+static bool is_commissioned;
 
 void app::set_hooks(const Hooks &h)
 {
@@ -36,6 +37,16 @@ void app::set_pairing_codes(const char *qr, const char *manual)
 {
 	pair_qr = qr;
 	pair_manual = manual;
+}
+
+void app::set_commissioned(bool on_fabric)
+{
+	is_commissioned = on_fabric;
+}
+
+bool app::commissioned()
+{
+	return is_commissioned;
 }
 
 void app::set_link(ui::Link state)

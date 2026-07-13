@@ -135,7 +135,8 @@ namespace
 		VIEW_MENU,
 		VIEW_PAIRING,
 		VIEW_CALIB_PROMPT,
-		VIEW_CALIB_PROGRESS
+		VIEW_CALIB_PROGRESS,
+		VIEW_COUNT
 	};
 	View shown_view = VIEW_NONE;   // what the panel currently shows
 	View pending_view = VIEW_BOOT; // staged by a set_<view>; committed by refresh()
@@ -277,16 +278,6 @@ namespace
 	}
 
 	/** Hide every content view; the status bar stays visible. */
-	void hide_all_content()
-	{
-		lv_obj_add_flag(boot_root, LV_OBJ_FLAG_HIDDEN);
-		lv_obj_add_flag(sensor_root, LV_OBJ_FLAG_HIDDEN);
-		lv_obj_add_flag(error_root, LV_OBJ_FLAG_HIDDEN);
-		lv_obj_add_flag(lowbat_root, LV_OBJ_FLAG_HIDDEN);
-		lv_obj_add_flag(reset_root, LV_OBJ_FLAG_HIDDEN);
-		lv_obj_add_flag(menu_root, LV_OBJ_FLAG_HIDDEN);
-		lv_obj_add_flag(calib_root, LV_OBJ_FLAG_HIDDEN);
-	}
 
 	/** Is this a view the user steps through with the button?
 	 *
@@ -323,6 +314,27 @@ namespace
 		case VIEW_CALIB_PROMPT:
 		case VIEW_CALIB_PROGRESS: return calib_root;
 		default:          return boot_root;
+		}
+	}
+
+	/** Hide every content view, so refresh() can un-hide exactly one.
+	 *
+	 * Driven off the View enum, not off a list kept by hand. The hand-kept one silently
+	 * omitted the pairing view when it was added, and an un-hidden view sits on top of every
+	 * other screen forever -- while the device cheerfully logs "display ok". A view the enum
+	 * knows about cannot be forgotten here.
+	 *
+	 * A null root is a view this build does not have (no radio -> no pairing view).
+	 */
+	void hide_all_content()
+	{
+		for (int v = VIEW_BOOT; v < VIEW_COUNT; v++)
+		{
+			lv_obj_t *root = root_for((View)v);
+			if (root)
+			{
+				lv_obj_add_flag(root, LV_OBJ_FLAG_HIDDEN);
+			}
 		}
 	}
 
@@ -588,7 +600,7 @@ namespace
 		lv_obj_t *rule = make_divider(menu_root, CONTENT_W - 48, 1);
 		lv_obj_align(rule, LV_ALIGN_TOP_MID, 0, 32);
 
-		static const char *const names[] = {"Calibrate CO2", "Pairing code", "Exit"};
+		static const char *const names[] = {"Calibrate CO2", "Matter", "Exit"};
 		static_assert(sizeof(names) / sizeof(names[0]) == (size_t)ui::Menu::Count,
 					  "every menu entry needs a label");
 
@@ -643,7 +655,7 @@ namespace
 		pair_root = make_view(scr);
 
 		lv_obj_t *hdr = make_label(pair_root, &b612_16, CONTENT_W);
-		lv_label_set_text(hdr, "PAIRING CODE");
+		lv_label_set_text(hdr, "MATTER");
 		lv_obj_align(hdr, LV_ALIGN_TOP_MID, 0, 6);
 
 		/* Sized so the module grid lands on whole pixels: the Matter payload is ~22 chars,
@@ -780,6 +792,17 @@ void ui::show_pairing()
 		return;
 	}
 	pending_view = VIEW_PAIRING;
+	dirty = true;
+}
+
+void ui::set_matter_status(bool commissioned)
+{
+	lv_obj_t *const row = ready ? menu_item[(int)Menu::Pairing] : nullptr;
+	if (!row)
+	{
+		return; // a build with no radio has no such row
+	}
+	lv_label_set_text(row, commissioned ? "Matter connected" : "Matter");
 	dirty = true;
 }
 
