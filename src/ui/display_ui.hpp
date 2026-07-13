@@ -49,21 +49,38 @@ namespace ui
 		Count
 	};
 
+	/** What this build of the device can actually do.
+	 *
+	 * The UI shows what is there and offers nothing that is not: a menu row exists because there
+	 * is something behind it, not because of a compile switch. So the caller says what it brought,
+	 * and everything else follows from that.
+	 */
+	struct Config
+	{
+		/** Named on the boot splash, so a glance at the panel says which image is on the board. */
+		const char *build = "Standalone";
+
+		/** Matter onboarding payload ("MT:..."), rendered as a QR. NULL in a build with no radio
+		 * -- then there is no Matter row, no view behind it, and no QR draw buffer (the single
+		 * largest allocation in the LVGL pool). */
+		const char *pair_qr = nullptr;
+
+		/** The same code for humans ("1234-567-8901"), drawn under the QR for when a camera will
+		 * not cooperate. Ignored if pair_qr is NULL. */
+		const char *pair_manual = nullptr;
+
+		/** Whether anything can actually be reset. If not, the menu does not offer it. */
+		bool factory_reset = false;
+	};
+
 	/** Build all widgets and show the boot splash (one full refresh).
 	 *
-	 * @param pair_qr     Matter onboarding payload ("MT:..."), rendered as a QR code, or NULL
-	 *                    in a build with no radio -- then there is no pairing view and no menu
-	 *                    entry leading to one
-	 * @param pair_manual the same code for humans ("1234-567-8901"), shown under the QR for
-	 *                    when a camera will not cooperate; ignored if pair_qr is NULL
-	 * @param with_factory_reset whether there is anything to reset -- if not, the menu does not
-	 *                    offer it
+	 * @param cfg what this build brought; see Config
 	 *
 	 * @retval 0   the panel is ready and the splash is on screen
 	 * @retval -1  no display; every other function here becomes a no-op
 	 */
-	int init(const char *pair_qr = nullptr, const char *pair_manual = nullptr,
-			 bool with_factory_reset = false);
+	int init(const Config &cfg = {});
 
 	/** Whether a menu entry exists in this build. See Menu. */
 	bool menu_has(Menu entry);

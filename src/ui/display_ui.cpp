@@ -422,29 +422,35 @@ namespace
 	}
 
 	/** Build the boot splash: wordmark, tagline, author, build stamp. */
-	void build_boot(lv_obj_t *scr)
+	void build_boot(lv_obj_t *scr, const char *build)
 	{
 		boot_root = make_view(scr);
 
 		lv_obj_t *logo = make_label(boot_root, &b612_48, CONTENT_W);
 		lv_label_set_text(logo, "AirInk");
-		lv_obj_align(logo, LV_ALIGN_CENTER, 0, -24);
+		lv_obj_align(logo, LV_ALIGN_CENTER, 0, -34);
 
 		lv_obj_t *rule = make_divider(boot_root, 180, 2);
-		lv_obj_align(rule, LV_ALIGN_CENTER, 0, 10);
+		lv_obj_align(rule, LV_ALIGN_CENTER, 0, 0);
 
 		lv_obj_t *sub = make_label(boot_root, &b612_16, CONTENT_W);
 		lv_label_set_text(sub, "Air Quality Monitor");
-		lv_obj_align(sub, LV_ALIGN_CENTER, 0, 36);
+		lv_obj_align(sub, LV_ALIGN_CENTER, 0, 26);
+
+		/* Which image is on the board. Two builds of this firmware exist and they look alike
+		 * everywhere else; the one moment the panel can say so for free is here. */
+		lv_obj_t *variant = make_label(boot_root, &b612_16, CONTENT_W);
+		lv_label_set_text(variant, build ? build : "");
+		lv_obj_align(variant, LV_ALIGN_CENTER, 0, 54);
 
 		lv_obj_t *foot = make_label(boot_root, &b612_14, CONTENT_W);
 		lv_label_set_text(foot, "by Marcus Voss");
 		lv_obj_align(foot, LV_ALIGN_BOTTOM_MID, 0, -24);
 
 		// Firmware version + build date/time (compile-time).
-		lv_obj_t *build = make_label(boot_root, &b612_14, CONTENT_W);
-		lv_label_set_text(build, "v" AIRINK_VERSION "  " __DATE__ "  " __TIME__);
-		lv_obj_align(build, LV_ALIGN_BOTTOM_MID, 0, -6);
+		lv_obj_t *stamp = make_label(boot_root, &b612_14, CONTENT_W);
+		lv_label_set_text(stamp, "v" AIRINK_VERSION "  " __DATE__ "  " __TIME__);
+		lv_obj_align(stamp, LV_ALIGN_BOTTOM_MID, 0, -6);
 	}
 
 	/** Build the sensor view: CO2 on top, humidity and temperature below. */
@@ -742,7 +748,7 @@ namespace
 
 } // namespace
 
-int ui::init(const char *pair_qr, const char *pair_manual, bool with_factory_reset)
+int ui::init(const Config &cfg)
 {
 	if (!plat::display_ready())
 	{
@@ -759,7 +765,7 @@ int ui::init(const char *pair_qr, const char *pair_manual, bool with_factory_res
 	uint32_t h = heap_used();
 	build_status_bar(scr);
 	h = log_built("status bar", h);
-	build_boot(scr);
+	build_boot(scr, cfg.build);
 	h = log_built("boot", h);
 	build_sensor(scr);
 	h = log_built("sensor", h);
@@ -769,15 +775,15 @@ int ui::init(const char *pair_qr, const char *pair_manual, bool with_factory_res
 	h = log_built("lowbat", h);
 	build_reset(scr);
 	h = log_built("reset", h);
-	build_menu(scr, pair_qr != nullptr, with_factory_reset);
+	build_menu(scr, cfg.pair_qr != nullptr, cfg.factory_reset);
 	h = log_built("menu", h);
 	build_calib(scr);
 	h = log_built("calib", h);
 	/* Only when there is something to pair over -- otherwise no view, and the QR's draw buffer
 	 * (the largest single allocation in the pool) is never made. */
-	if (pair_qr)
+	if (cfg.pair_qr)
 	{
-		build_pairing(scr, pair_qr, pair_manual ? pair_manual : "");
+		build_pairing(scr, cfg.pair_qr, cfg.pair_manual ? cfg.pair_manual : "");
 		log_built("pairing", h);
 	}
 	ready = true;

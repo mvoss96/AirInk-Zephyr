@@ -20,6 +20,7 @@ static uint16_t last_co2_ppm;					// held on screen between the five-minute CO2 
 static app::Hooks hooks;
 
 // Not copied: they are string literals or static buffers owned by the caller (see app.hpp).
+static const char *build_name = "Standalone";
 static const char *pair_qr;
 static const char *pair_manual;
 
@@ -31,6 +32,11 @@ static bool is_commissioned;
 void app::set_hooks(const Hooks &h)
 {
 	hooks = h;
+}
+
+void app::set_build_name(const char *name)
+{
+	build_name = name;
 }
 
 void app::set_pairing_codes(const char *qr, const char *manual)
@@ -198,13 +204,18 @@ static void app_loop()
 
 void app::run()
 {
-	// What the menu offers is decided here, by what the caller actually gave us: a Matter entry
-	// where there are codes to show, a Factory reset entry where there is something to reset.
-	const bool display_ok =
-		(ui::init(pair_qr, pair_manual, hooks.factory_reset != nullptr) == 0);
+	// What the UI shows and offers is decided here, by what the caller actually gave us: a Matter
+	// row where there are codes to show, a Factory reset row where there is something to reset.
+	const ui::Config ui_cfg = {
+		.build = build_name,
+		.pair_qr = pair_qr,
+		.pair_manual = pair_manual,
+		.factory_reset = hooks.factory_reset != nullptr,
+	};
+	const bool display_ok = (ui::init(ui_cfg) == 0);
 
-	printk("AirInk v%s (%s %s) started (display %s)\n",
-		   AIRINK_VERSION, __DATE__, __TIME__, display_ok ? "ok" : "FAILED");
+	printk("AirInk v%s %s (%s %s) started (display %s)\n",
+		   AIRINK_VERSION, build_name, __DATE__, __TIME__, display_ok ? "ok" : "FAILED");
 
 	if (scd41::init() < 0)
 	{

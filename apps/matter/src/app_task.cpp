@@ -215,6 +215,7 @@ void AirInkThread(void *, void *, void *)
 		.factory_reset = FactoryReset,
 	};
 	::app::set_hooks(hooks);
+	::app::set_build_name("Matter over Thread");
 	::app::run(); /* never returns */
 }
 

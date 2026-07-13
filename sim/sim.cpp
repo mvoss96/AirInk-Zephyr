@@ -85,7 +85,13 @@ int main()
 	/* The onboarding codes the Matter build hands to ui::init(): a real payload from the
 	 * device, so the QR in the mockup is the QR on the panel. Passing them is also what makes
 	 * the menu grow its Matter entry -- a build with no radio gets neither. */
-	if (ui::init("MT:M1TJ342C00KA0648G00", "3535-860-0323", /*with_factory_reset=*/true) != 0)
+	const ui::Config cfg = {
+		.build = "Matter over Thread",
+		.pair_qr = "MT:M1TJ342C00KA0648G00",
+		.pair_manual = "3535-860-0323",
+		.factory_reset = true,
+	};
+	if (ui::init(cfg) != 0)
 	{
 		std::printf("ui::init failed\n");
 		return 1;

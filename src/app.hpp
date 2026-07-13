@@ -45,6 +45,16 @@ namespace app
 	/** Install the observers. Call before run(). */
 	void set_hooks(const Hooks &hooks);
 
+	/** Name this build, for the boot splash. Call before run().
+	 *
+	 * Two builds of this firmware exist and they look alike everywhere else, so the panel says
+	 * which one is on the board. A caller that says nothing gets "Standalone", which is what a
+	 * build that installs no hooks and no codes is.
+	 *
+	 * The string is not copied. It must outlive run(), which never returns.
+	 */
+	void set_build_name(const char *name);
+
 	/** Install the device's onboarding codes. Call before run().
 	 *
 	 * With them, the menu offers a "Pairing code" entry that puts the QR and the manual code on
