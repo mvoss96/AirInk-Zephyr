@@ -52,6 +52,14 @@ bool app::commissioned()
 	return is_commissioned;
 }
 
+void app::open_pairing()
+{
+	if (hooks.pairing_open)
+	{
+		hooks.pairing_open();
+	}
+}
+
 void app::set_link(ui::Link state)
 {
 	link_state = state;
@@ -104,6 +112,67 @@ static void measure()
 	}
 
 	tick_count++;
+}
+
+/** A device that has never joined anything boots to its own onboarding code.
+ *
+ * The readings are not what a factory-new device is for: nobody has told it where to send them, and
+ * the one thing the user has to do -- scan the code -- is the one thing the panel can help with. So
+ * it shows the code first and the numbers afterwards. The radio is already listening; the boot
+ * window opened on its own (CONFIG_CHIP_ENABLE_PAIRING_AUTOSTART).
+ *
+ * Nothing is measured while this is up. That is not laziness: a reading here would have nowhere to
+ * go, and staging it would repaint the panel -- and a panel refresh is the single most expensive
+ * thing this device does (~39 % of its energy). The screen is e-paper; leaving the code on it costs
+ * nothing at all.
+ *
+ * Two ways out, and the device takes whichever comes first:
+ *   - a fabric appears  -> somebody scanned it. On to the readings, no gesture needed.
+ *   - the button        -> the user declined. On to the readings, and the caller is told, so it can
+ *                          cut the commissioning window short rather than leave it open for the
+ *                          hour boot gave it.
+ *
+ * A build with no codes -- the standalone one -- has no onboarding to do and returns at once.
+ */
+static void onboarding()
+{
+	if (!pair_qr || is_commissioned)
+	{
+		return;
+	}
+
+	printk("[MTR] not commissioned; the panel shows the onboarding code\n");
+	ui::show_matter(false);
+
+	while (true)
+	{
+		// The battery hook is also what re-reads the fabric table in the Matter build, which is
+		// how the loop below sees somebody commissioning us without touching the button.
+		const battery::State bat = battery::read();
+		ui::set_battery(bat.pct, bat.charging);
+		if (hooks.battery)
+		{
+			hooks.battery(bat);
+		}
+
+		if (is_commissioned)
+		{
+			printk("[MTR] commissioned; on to the readings\n");
+			return;
+		}
+
+		ui::refresh(); // only actually repaints when the battery moved
+
+		if (button::wait_until(k_uptime_get() + TICK_MS) != button::Event::None)
+		{
+			printk("[MTR] onboarding code dismissed\n");
+			if (hooks.pairing_dismissed)
+			{
+				hooks.pairing_dismissed();
+			}
+			return;
+		}
+	}
 }
 
 /** The main app loop */
@@ -231,5 +300,6 @@ void app::run()
 	}
 	ui::log_pool("boot splash"); // every view is built; this is the resident cost
 
+	onboarding(); // returns at once unless this is a radio build that has never been commissioned
 	app_loop();
 }

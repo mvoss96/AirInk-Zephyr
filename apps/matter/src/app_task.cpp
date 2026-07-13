@@ -198,6 +198,79 @@ void FetchOnboardingCodes()
 	::app::set_pairing_codes(sQrCode, GroupManualCode(sManualCode));
 }
 
+/* How long the radio listens after the user asks for the code. Ten minutes is what it takes to
+ * fetch a phone and scan; it is not how long an accidental visit to the menu should leave the door
+ * open. This is deliberately NOT the boot window: OpenBasicCommissioningWindow() defaults to
+ * CHIP_DEVICE_CONFIG_DISCOVERY_TIMEOUT_SECS, which the nRF platform derives from
+ * CONFIG_CHIP_BLE_ADVERTISING_DURATION (60 min) -- right for a factory-new device that nobody has
+ * touched yet, too generous for a gesture. */
+constexpr auto kPanelPairingWindow = System::Clock::Seconds32(10 * 60);
+
+/* The user just put the onboarding code on the panel, so start listening for whoever scans it.
+ *
+ * The code alone is not an invitation. CHIP advertises for an hour after boot and then stops, so on
+ * a device that has been sitting on a shelf the QR would be a dead letter -- shown, scanned, and
+ * never answered. Opening the window here is what makes the screen mean what it says.
+ *
+ * Runs on AirInk's thread, so it takes the stack lock, like the publish hooks above.
+ *
+ * The two guards mirror Nordic's own Board::StartBLEAdvertisement (nrf/samples/matter/common):
+ * a commissioned device must not re-open (a second commissioner could join uninvited -- and the
+ * menu does not offer this path there anyway), and an already-advertising one must not be
+ * restarted, which would drop a PASE session that may be seconds from completing. Note the second
+ * guard also means a device still inside its boot hour keeps that hour: this call does not shorten
+ * a window that is already open.
+ */
+void OpenPairingWindow()
+{
+	PlatformMgr().LockChipStack();
+
+	if (Server::GetInstance().GetFabricTable().FabricCount() != 0) {
+		LOG_INF("Already commissioned; not re-opening the window");
+	} else if (ConnectivityMgr().IsBLEAdvertisingEnabled()) {
+		LOG_INF("Commissioning window already open");
+	} else if (Server::GetInstance().GetCommissioningWindowManager().OpenBasicCommissioningWindow(
+			   kPanelPairingWindow) != CHIP_NO_ERROR) {
+		LOG_ERR("Could not open the commissioning window");
+	} else {
+		LOG_INF("Commissioning window opened from the panel for %u s",
+			kPanelPairingWindow.count());
+	}
+
+	PlatformMgr().UnlockChipStack();
+}
+
+/* The user pressed the boot onboarding screen away. They saw the code and did not want it (yet), so
+ * the hour that CONFIG_CHIP_ENABLE_PAIRING_AUTOSTART opened is now an hour of advertising nobody
+ * asked for. Cut it to the same ten minutes the menu grants -- enough time to change their mind and
+ * fetch a phone, not enough to leave the door open all afternoon.
+ *
+ * There is no "shorten" in CHIP, so this closes and re-opens. That is safe precisely here and
+ * nowhere else: the user just pressed a button on a device that is not commissioned, which is not
+ * something anyone does in the middle of scanning it. (The menu's OpenPairingWindow deliberately
+ * does NOT do this -- it leaves an open window alone, because there it really could be interrupting
+ * a PASE session.)
+ */
+void ShortenPairingWindow()
+{
+	PlatformMgr().LockChipStack();
+
+	auto &window = Server::GetInstance().GetCommissioningWindowManager();
+	if (Server::GetInstance().GetFabricTable().FabricCount() != 0) {
+		LOG_INF("Commissioned in the meantime; leaving the window alone");
+	} else {
+		window.CloseCommissioningWindow();
+		if (window.OpenBasicCommissioningWindow(kPanelPairingWindow) != CHIP_NO_ERROR) {
+			LOG_ERR("Could not re-open the commissioning window");
+		} else {
+			LOG_INF("Onboarding dismissed; window now closes in %u s",
+				kPanelPairingWindow.count());
+		}
+	}
+
+	PlatformMgr().UnlockChipStack();
+}
+
 /* The user held the button on a confirmation screen that said what this does. CHIP wipes the
  * fabrics and reboots; it schedules the work rather than doing it here, because we are on AirInk's
  * thread and the storage belongs to the CHIP one. */
@@ -213,6 +286,8 @@ void AirInkThread(void *, void *, void *)
 		.reading = PublishReading,
 		.battery = PublishBattery,
 		.factory_reset = FactoryReset,
+		.pairing_open = OpenPairingWindow,
+		.pairing_dismissed = ShortenPairingWindow,
 	};
 	::app::set_hooks(hooks);
 	::app::set_build_name("Matter over Thread");

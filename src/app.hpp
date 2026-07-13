@@ -40,6 +40,26 @@ namespace app
 		 * The loop knows the gesture; only the caller knows what a network is. Null in a build
 		 * with no radio -- which never shows the screen that asks. */
 		void (*factory_reset)();
+
+		/** The user is looking at the onboarding code: make it scannable.
+		 *
+		 * Called every time the Matter view opens on an uncommissioned device. The code on the
+		 * panel is only half the invitation -- the other half is the radio actually listening, and
+		 * that window closes an hour after boot (CONFIG_CHIP_BLE_ADVERTISING_DURATION). Without
+		 * this, a device left alone overnight shows a QR that nothing will answer.
+		 *
+		 * Idempotent: the view can be opened again while the window is already open.
+		 */
+		void (*pairing_open)();
+
+		/** The user pressed the code away on a device that has never been commissioned.
+		 *
+		 * They saw the invitation and declined it, so stop shouting: the caller is expected to cut
+		 * the window that boot opened down to something short. Not "close it" -- they may be
+		 * walking to fetch their phone -- just stop it standing open for the rest of the hour.
+		 *
+		 * Only ever called from the boot onboarding screen, and never once a fabric exists. */
+		void (*pairing_dismissed)();
 	};
 
 	/** Install the observers. Call before run(). */
@@ -79,6 +99,14 @@ namespace app
 	 */
 	void set_commissioned(bool on_fabric);
 	bool commissioned();
+
+	/** Ask the radio to accept a commissioner, because the code is now on the panel.
+	 *
+	 * Calls Hooks::pairing_open, if there is one. The menu calls this when it opens the Matter
+	 * view on an uncommissioned device; nothing calls it when the view closes, and that is
+	 * deliberate -- see menu.cpp.
+	 */
+	void open_pairing();
 
 	/** Report the radio state for the status bar, from any thread.
 	 *

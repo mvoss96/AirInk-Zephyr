@@ -100,11 +100,25 @@ namespace
 	 *
 	 * It only ever tells you something, so any gesture takes you back. Leaving the network is a
 	 * menu entry of its own -- not a gesture hidden on a screen that reads like a status line.
+	 *
+	 * Showing the code also re-opens the commissioning window. The radio only listens for an hour
+	 * after boot, so on a device that has been sitting on a shelf the code alone would be a dead
+	 * letter -- putting it on the panel is the moment the user means to use it, so that is the
+	 * moment to listen.
+	 *
+	 * Leaving the screen does NOT close the window again, and that is on purpose: the user leaves
+	 * it precisely when they have just scanned the code, and the commissioner needs the next few
+	 * seconds to answer. Closing on the way out would abort the join it was opened for. The window
+	 * closes itself -- on success, or on its own timeout.
 	 */
 	void to_matter()
 	{
 		go(State::Matter);
 		idle_at = k_uptime_get() + PROMPT_IDLE_MS;
+		if (!app::commissioned())
+		{
+			app::open_pairing();
+		}
 		ui::show_matter(app::commissioned());
 	}
 
