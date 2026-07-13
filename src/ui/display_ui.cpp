@@ -433,9 +433,9 @@ namespace
 		lv_obj_t *rule = make_divider(boot_root, 180, 2);
 		lv_obj_align(rule, LV_ALIGN_CENTER, 0, 0);
 
-		lv_obj_t *sub = make_label(boot_root, &b612_16, CONTENT_W);
-		lv_label_set_text(sub, "Air Quality Monitor");
-		lv_obj_align(sub, LV_ALIGN_CENTER, 0, 26);
+		lv_obj_t *author = make_label(boot_root, &b612_16, CONTENT_W);
+		lv_label_set_text(author, "Marcus Voss");
+		lv_obj_align(author, LV_ALIGN_CENTER, 0, 26);
 
 		/* Which image is on the board. Two builds of this firmware exist and they look alike
 		 * everywhere else; the one moment the panel can say so for free is here. */
@@ -443,13 +443,14 @@ namespace
 		lv_label_set_text(variant, build ? build : "");
 		lv_obj_align(variant, LV_ALIGN_CENTER, 0, 54);
 
-		lv_obj_t *foot = make_label(boot_root, &b612_14, CONTENT_W);
-		lv_label_set_text(foot, "by Marcus Voss");
-		lv_obj_align(foot, LV_ALIGN_BOTTOM_MID, 0, -24);
+		// Version above the build stamp, and bigger: it is the thing you actually look for when
+		// you want to know what is on the board. The date only settles which build of it.
+		lv_obj_t *version = make_label(boot_root, &b612_16, CONTENT_W);
+		lv_label_set_text(version, "v" AIRINK_VERSION);
+		lv_obj_align(version, LV_ALIGN_BOTTOM_MID, 0, -24);
 
-		// Firmware version + build date/time (compile-time).
 		lv_obj_t *stamp = make_label(boot_root, &b612_14, CONTENT_W);
-		lv_label_set_text(stamp, "v" AIRINK_VERSION "  " __DATE__ "  " __TIME__);
+		lv_label_set_text(stamp, __DATE__ "  " __TIME__);
 		lv_obj_align(stamp, LV_ALIGN_BOTTOM_MID, 0, -6);
 	}
 
