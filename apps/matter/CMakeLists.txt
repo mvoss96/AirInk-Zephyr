@@ -17,15 +17,15 @@ list(APPEND DTS_ROOT ${AIRINK_ROOT})
 # board facts only -- see the file's header.
 list(APPEND EXTRA_CONF_FILE ${AIRINK_ROOT}/conf/airink_hw.conf)
 
-# For the measurement build -- the same firmware with its voice turned off, because a live console
-# UARTE costs more than the radio we are trying to weigh -- add power.conf on the command line:
+# conf/release.conf turns the logging off (worth ~7 uA). It is opt-in on the command line rather
+# than a switch here, because EXTRA_CONF_FILE has to be set before find_package(Zephyr), and
+# zephyr_get() -- the only thing that could read a sysbuild -D -- does not exist until after it:
 #
 #   west build -b promicro_nrf52840/nrf52840 apps/matter -d <dir> \
-#       -- -Dmatter_EXTRA_CONF_FILE=<abs>/apps/matter/power.conf
+#       -- -Dmatter_EXTRA_CONF_FILE=<abs>/conf/release.conf
 #
-# The `matter_` prefix is how sysbuild routes a variable to this image rather than to itself. There
-# is no CMake switch here on purpose: EXTRA_CONF_FILE must be set before find_package(Zephyr), and
-# zephyr_get() -- the thing that could read a sysbuild -D -- only exists after it. See power.conf.
+# The `matter_` prefix is how sysbuild routes a variable to this image rather than to itself; a bare
+# -DAIRINK_POWER=y would land in the sysbuild cache and never be forwarded. See that file's header.
 
 find_package(Zephyr HINTS $ENV{ZEPHYR_BASE})
 

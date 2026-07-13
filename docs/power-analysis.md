@@ -227,8 +227,8 @@ The first number was 1.3 mA average, 620 µA idle. That number is nearly worthle
 mostly the console. A live console UARTE holds the HFCLK on, and the Matter build is the loud
 one — CHIP logs every message it sends and receives.
 
-Rebuilt with the logging off (`apps/matter/power.conf`), which also hands the console back to
-the loop so it powers the UART down between cycles:
+Rebuilt with the logging off (the fragment now at `conf/release.conf`), which also hands the console
+back to the loop so it powers the UART down between cycles:
 
 | | logging on | logging off |
 |---|---|---|
@@ -304,13 +304,17 @@ Not yet proven; it is the next experiment.
 ## Reproducing
 
 ```
-west build -b promicro_nrf52840/nrf52840 apps/matter -d <dir> \
-    -- -Dmatter_EXTRA_CONF_FILE=<abs>/apps/matter/power.conf
+west build -b promicro_nrf52840/nrf52840 apps/matter -d <dir>
 ```
 
+Measure the ordinary, talking build — that is the firmware that ships. (The chapters above muted it
+first, which was necessary *then* and is not any more; see below. The mute switch still exists as
+`conf/release.conf`, opt-in via `-Dmatter_EXTRA_CONF_FILE=<abs>/conf/release.conf`, but it is worth
+about 7 µA now, not the ~650 µA it looked like here.)
+
 Flash it, then **power-cycle via the PPK2** rather than resetting over SWD, or the debug domain
-stays powered and the idle floor is a fiction. The Zephyr boot banner still comes out (it goes
-through `printk`, not the logging subsystem), which is how you know the board came up at all.
+stays powered and the idle floor is a fiction. And unplug the J-Link: **an attached probe adds
+~155 µA** all by itself, which is more than the idle floor it is supposed to help you read.
 
 ---
 
@@ -344,10 +348,12 @@ It asserted on the first try — `ASSERTION FAIL @ nrfx_twi.c:312`. The reason i
 |---|---|
 | Matter, full CHIP logging, legacy drivers | ~705 µA |
 | Matter, full CHIP logging, **runtime PM + DMA** | **~60 µA** |
-| Matter, logging off entirely (power.conf) | 55 µA |
+| Matter, logging off entirely (`conf/release.conf`) | 55 µA |
 
-**Logging now costs about 7 µA.** `apps/matter/power.conf` is no longer a measurement crutch — it
-is worth about 5 µA, and the shipped firmware keeps its console.
+**Logging now costs about 7 µA** — against a 343 µA shipping average, about 2 %. So the mute switch
+is no longer a measurement crutch (measure the talking firmware; it is the honest number), and the
+shipped firmware keeps its console. It survives as `conf/release.conf`, an opt-in fragment for a
+release image where nobody is reading the console anyway and 7 µA is still 7 µA.
 
 `app.cpp`'s hand-rolled console suspend is deleted. The driver does it per line, in every build.
 
