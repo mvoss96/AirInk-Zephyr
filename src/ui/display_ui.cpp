@@ -113,7 +113,7 @@ namespace
 	/* The pairing view. The QR canvas is an I1 (1-bit indexed) draw buffer that lv_qrcode
 	 * allocates from the LVGL pool when we hand it the payload -- so a build without codes
 	 * never pays for it. */
-	lv_obj_t *pair_root, *pair_qr_obj, *pair_code_lbl;
+	lv_obj_t *pair_root, *pair_qr_obj, *pair_code_lbl, *pair_state_lbl, *pair_hint;
 
 	/* The two calibration steps share one set of widgets. They still get one View each,
 	 * so the step change is a view change and thus a full refresh -- the big DSEG7
@@ -568,16 +568,16 @@ namespace
 
 		lv_obj_t *title = make_label(reset_root, &b612_28, CONTENT_W);
 		lv_label_set_text(title, "FACTORY RESET");
-		lv_obj_align(title, LV_ALIGN_CENTER, 0, -75);
+		lv_obj_align(title, LV_ALIGN_CENTER, 0, -60);
 
-		// Big DSEG7 countdown (seconds left), matching the sensor values.
-		reset_seconds_lbl = make_label(reset_root, &dseg7_48, 0);
-		lv_obj_align(reset_seconds_lbl, LV_ALIGN_CENTER, 0, 0);
-		lv_label_set_text(reset_seconds_lbl, "");
+		lv_obj_t *body = make_label(reset_root, &b612_16, CONTENT_W - 60);
+		lv_label_set_text(body, "This removes the device from your\nnetwork. You will have to pair it again.");
+		lv_obj_align(body, LV_ALIGN_CENTER, 0, 5);
 
+		// Tap is the reflex, so tap is the harmless one. Same rule as the calibration prompt.
 		lv_obj_t *hint = make_label(reset_root, &b612_16, CONTENT_W);
-		lv_label_set_text(hint, "Release to cancel");
-		lv_obj_align(hint, LV_ALIGN_CENTER, 0, 72);
+		lv_label_set_text(hint, "Tap = cancel     Hold = reset");
+		lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -10);
 	}
 
 	/** Build the settings menu: a header, one label per entry, a moving cursor.
@@ -672,9 +672,15 @@ namespace
 		lv_label_set_text(pair_code_lbl, manual);
 		lv_obj_align(pair_code_lbl, LV_ALIGN_BOTTOM_MID, 0, -26);
 
-		lv_obj_t *hint = make_label(pair_root, &b612_14, CONTENT_W);
-		lv_label_set_text(hint, "Tap to go back");
-		lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -6);
+		/* The other half of the same screen: once on a fabric there is nothing to scan, so the
+		 * QR gives way to the state -- and to the one thing left to do here, leave the network. */
+		pair_state_lbl = make_label(pair_root, &b612_48, CONTENT_W);
+		lv_label_set_text(pair_state_lbl, "CONNECTED");
+		lv_obj_align(pair_state_lbl, LV_ALIGN_CENTER, 0, -10);
+		lv_obj_add_flag(pair_state_lbl, LV_OBJ_FLAG_HIDDEN);
+
+		pair_hint = make_label(pair_root, &b612_14, CONTENT_W);
+		lv_obj_align(pair_hint, LV_ALIGN_BOTTOM_MID, 0, -6);
 	}
 
 	/** Build the shared calibration skeleton: title, progress bar, body, hint. */
@@ -785,24 +791,27 @@ bool ui::menu_has(Menu entry)
 	return ready && menu_row[(int)entry] >= 0;
 }
 
-void ui::show_pairing()
+void ui::show_matter(bool commissioned)
 {
 	if (!ready || !pair_root)
 	{
 		return;
 	}
-	pending_view = VIEW_PAIRING;
-	dirty = true;
-}
 
-void ui::set_matter_status(bool commissioned)
-{
-	lv_obj_t *const row = ready ? menu_item[(int)Menu::Pairing] : nullptr;
-	if (!row)
+	// Scan-me and already-on-the-network are the same screen with one half swapped out.
+	const bool show_qr = !commissioned;
+	lv_obj_t *const qr_half[] = { pair_qr_obj, pair_code_lbl };
+	for (lv_obj_t *o : qr_half)
 	{
-		return; // a build with no radio has no such row
+		show_qr ? lv_obj_clear_flag(o, LV_OBJ_FLAG_HIDDEN) : lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
 	}
-	lv_label_set_text(row, commissioned ? "Matter connected" : "Matter");
+	show_qr ? lv_obj_add_flag(pair_state_lbl, LV_OBJ_FLAG_HIDDEN)
+			: lv_obj_clear_flag(pair_state_lbl, LV_OBJ_FLAG_HIDDEN);
+
+	// The hold only means something once there is a network to leave.
+	lv_label_set_text(pair_hint, show_qr ? "Tap to go back" : "Tap = back     Hold = factory reset");
+
+	pending_view = VIEW_PAIRING;
 	dirty = true;
 }
 
@@ -895,24 +904,13 @@ void ui::set_low_battery()
 	dirty = true;
 }
 
-void ui::set_reset(uint8_t seconds_left)
+void ui::set_reset_prompt()
 {
 	if (!ready)
 	{
 		return;
 	}
 	pending_view = VIEW_RESET;
-
-	if ((int)seconds_left == last_reset_seconds)
-	{
-		return; // same value already on the widgets
-	}
-
-	char buf[8];
-	snprintf(buf, sizeof(buf), "%u", seconds_left);
-	lv_label_set_text(reset_seconds_lbl, buf);
-
-	last_reset_seconds = seconds_left;
 	dirty = true;
 }
 

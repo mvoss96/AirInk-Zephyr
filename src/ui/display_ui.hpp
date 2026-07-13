@@ -64,20 +64,16 @@ namespace ui
 	/** Whether a menu entry exists in this build. See Menu. */
 	bool menu_has(Menu entry);
 
-	/** Select the pairing view: the QR and the manual code given to init().
-	 * A no-op when init() was given none.
-	 */
-	void show_pairing();
-
-	/** Stage what the menu's Matter row says.
+	/** Select the Matter view.
 	 *
-	 * Once the device is on a fabric there is nothing to scan, so the row stops being a way in
-	 * and becomes a statement of fact. The caller stops letting the cursor land on it (see
-	 * menu_has()); this only changes the words.
+	 * Two states, one screen, because they answer the same question -- "is this thing on my
+	 * network?". Uncommissioned it shows the QR and the manual code given to init(); commissioned
+	 * there is nothing to scan, so it says so, and offers the way back out of the network.
+	 * A no-op when init() was given no codes.
 	 *
 	 * @param commissioned whether the device is already on a fabric
 	 */
-	void set_matter_status(bool commissioned);
+	void show_matter(bool commissioned);
 
 	/** Stage the battery indicator, shown on every view.
 	 *
@@ -117,11 +113,14 @@ namespace ui
 	 */
 	void set_error(const char *title, const char *detail);
 
-	/** Select the factory-reset view and stage the countdown.
+	/** Select the factory-reset confirmation.
 	 *
-	 * @param seconds_left seconds remaining before the reset fires
+	 * A factory reset drops every fabric: the device leaves the network it is on, and whoever put
+	 * it there has to put it back. That is not undoable, and this device has one button -- so it
+	 * gets the same safety net as a recalibration, a screen that says what is about to happen and
+	 * makes the destructive answer the deliberate one (hold), not the reflex (tap).
 	 */
-	void set_reset(uint8_t seconds_left);
+	void set_reset_prompt();
 
 	/** Select the low-battery warning view.
 	 * It is another view of the same battery as the status bar, so it draws the

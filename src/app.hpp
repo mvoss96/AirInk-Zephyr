@@ -34,6 +34,12 @@ namespace app
 
 		/** The battery, every cycle, whatever else happened. */
 		void (*battery)(const battery::State &bat);
+
+		/** Drop every network the device is on, because the user confirmed it on the panel.
+		 *
+		 * The loop knows the gesture; only the caller knows what a network is. Null in a build
+		 * with no radio -- which never shows the screen that asks. */
+		void (*factory_reset)();
 	};
 
 	/** Install the observers. Call before run(). */

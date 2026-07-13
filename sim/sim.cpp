@@ -117,9 +117,9 @@ int main()
 	snapshot("lowbat");
 
 	g_tick_ms += 100;
-	ui::set_reset(3); // factory-reset countdown
+	ui::set_reset_prompt(); // the confirmation, reached by holding on the connected Matter screen
 	ui::refresh();
-	snapshot("reset");
+	snapshot("reset_prompt");
 
 	// The calibration flow, one snapshot per step the user walks through.
 	g_tick_ms += 100;
@@ -138,20 +138,19 @@ int main()
 	ui::refresh();
 	snapshot("menu_exit");
 
-	// The Matter row, both ways. Uncommissioned it is a way in to the QR; once on a fabric it
-	// says so and the cursor skips it (menu.cpp), which is why the highlight sits on Exit.
+	// The Matter screen, both halves. Uncommissioned: something to scan, radio advertising over
+	// BLE. Commissioned: nothing to scan, so the state instead -- and the way back out.
 	g_tick_ms += 100;
 	ui::set_link(ui::Link::BleAdv);
-	ui::show_pairing();
+	ui::show_matter(/*commissioned=*/false);
 	ui::refresh();
 	snapshot("matter_pairing");
 
 	g_tick_ms += 100;
 	ui::set_link(ui::Link::ThreadConnected);
-	ui::set_matter_status(/*commissioned=*/true);
-	ui::set_menu(ui::Menu::Exit);
+	ui::show_matter(/*commissioned=*/true);
 	ui::refresh();
-	snapshot("menu_matter_connected");
+	snapshot("matter_connected");
 
 	g_tick_ms += 100;
 	ui::set_calib_prompt();

@@ -198,9 +198,22 @@ void FetchOnboardingCodes()
 	::app::set_pairing_codes(sQrCode, GroupManualCode(sManualCode));
 }
 
+/* The user held the button on a confirmation screen that said what this does. CHIP wipes the
+ * fabrics and reboots; it schedules the work rather than doing it here, because we are on AirInk's
+ * thread and the storage belongs to the CHIP one. */
+void FactoryReset()
+{
+	LOG_INF("Factory reset requested from the panel");
+	Server::GetInstance().ScheduleFactoryReset();
+}
+
 void AirInkThread(void *, void *, void *)
 {
-	const ::app::Hooks hooks = { .reading = PublishReading, .battery = PublishBattery };
+	const ::app::Hooks hooks = {
+		.reading = PublishReading,
+		.battery = PublishBattery,
+		.factory_reset = FactoryReset,
+	};
 	::app::set_hooks(hooks);
 	::app::run(); /* never returns */
 }

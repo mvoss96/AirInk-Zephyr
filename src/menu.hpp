@@ -29,12 +29,13 @@ namespace menu
 	// Fresh outdoor air, the only concentration a user can reliably stand in.
 	constexpr uint16_t CALIB_TARGET_PPM = 420;
 
-	/** What proceed() wants main to do next. */
+	/** What proceed() wants the loop to do next. */
 	enum class Status : uint8_t
 	{
-		Running,	 // still inside; nothing for main to do
-		Exited,		 // show the readings again
-		Recalibrated // as Exited, but the retained CO2 value predates the correction
+		Running,	  // still inside; nothing for the loop to do
+		Exited,		  // show the readings again
+		Recalibrated, // as Exited, but the retained CO2 value predates the correction
+		FactoryReset  // the user confirmed it; the loop owns the hook that can actually do it
 	};
 
 	/** Open the menu on its first entry. */

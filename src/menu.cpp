@@ -32,7 +32,8 @@ namespace
 		CalibPrompt,
 		CalibRun,
 		CalibFailed,
-		Pairing
+		Matter,
+		ResetPrompt
 	};
 
 	State state = State::Root;
@@ -49,7 +50,8 @@ namespace
 		case State::CalibPrompt: return "calib-prompt";
 		case State::CalibRun: return "calib-run";
 		case State::CalibFailed: return "calib-failed";
-		case State::Pairing: return "pairing";
+		case State::Matter: return "matter";
+		case State::ResetPrompt: return "reset-prompt";
 		default: return "root";
 		}
 	}
@@ -67,43 +69,44 @@ namespace
 		state = next;
 	}
 
-	/** Can the cursor stop here?
+	/** Advance the cursor to the next entry this build has.
 	 *
-	 * Two reasons it cannot. The entry may not exist at all -- a build with no radio has no
-	 * Matter row, and it is not drawn. Or it may exist but have nothing behind it: once the
-	 * device is on a fabric the Matter row still says so, but there is no longer a code to
-	 * scan, so it stops being a way in and becomes a statement of fact. Either way the cursor
-	 * must skip it, or a hold would appear to do nothing.
+	 * A build with no radio has no Matter row -- it is not drawn, so the cursor must not stop
+	 * on it either, or a tap would appear to do nothing.
 	 */
-	bool selectable(ui::Menu e)
-	{
-		if (!ui::menu_has(e))
-		{
-			return false;
-		}
-		return !(e == ui::Menu::Pairing && app::commissioned());
-	}
-
 	ui::Menu next_entry(ui::Menu from)
 	{
 		ui::Menu e = from;
 		do
 		{
 			e = (ui::Menu)(((int)e + 1) % (int)ui::Menu::Count);
-		} while (!selectable(e) && e != from);
+		} while (!ui::menu_has(e) && e != from);
 		return e;
 	}
 
-	/** Show the onboarding QR and the manual code, until the user has had enough.
+	/** The Matter screen: the QR while there is something to scan, the state once there is not.
 	 *
-	 * Nothing is being decided here, so any gesture dismisses it -- and so does the idle
-	 * timeout, because a pairing code left on an e-paper panel is a code left on display.
+	 * A tap leaves, always. A hold means something only on the connected half, where the one
+	 * thing left to do is leave the network -- and that goes through a confirmation, because it
+	 * cannot be undone.
 	 */
-	void to_pairing()
+	void to_matter()
 	{
-		go(State::Pairing);
+		go(State::Matter);
 		idle_at = k_uptime_get() + PROMPT_IDLE_MS;
-		ui::show_pairing();
+		ui::show_matter(app::commissioned());
+	}
+
+	/** Ask before dropping every fabric.
+	 *
+	 * The same safety net as the calibration prompt, for the same reason: one button, and an
+	 * answer that cannot be taken back. Tap is the reflex, so tap is the harmless one.
+	 */
+	void to_reset_prompt()
+	{
+		go(State::ResetPrompt);
+		idle_at = k_uptime_get() + MENU_IDLE_MS;
+		ui::set_reset_prompt();
 	}
 
 	void to_calib_prompt()
@@ -177,9 +180,6 @@ void menu::enter()
 	cursor = ui::Menu::Calibrate;
 	idle_at = k_uptime_get() + MENU_IDLE_MS;
 	printk("[UI] menu opened\n");
-	// The Matter row is a way in while there is a code to scan, and a statement of fact after.
-	// Read once here, not per keystroke: the state cannot change while the menu is open.
-	ui::set_matter_status(app::commissioned());
 	ui::set_menu(cursor);
 }
 
@@ -216,7 +216,7 @@ menu::Status menu::proceed(button::Event e)
 				to_calib_prompt();
 				break;
 			case ui::Menu::Pairing:
-				to_pairing();
+				to_matter();
 				break;
 			default:
 				return Status::Exited;
@@ -267,7 +267,24 @@ menu::Status menu::proceed(button::Event e)
 	case State::CalibFailed:
 		return (e != button::Event::None || now >= idle_at) ? Status::Exited : Status::Running;
 
-	case State::Pairing:
+	case State::Matter:
+		// A hold is the way out of the network -- but only when there is one to leave. On the
+		// QR half it means nothing, so it does what a tap does: leave the screen.
+		if (e == button::Event::Long && app::commissioned())
+		{
+			to_reset_prompt();
+			return Status::Running;
+		}
+		// An onboarding code left on an e-paper panel is a code left on display, so the idle
+		// timeout matters here as much as the gesture.
+		return (e != button::Event::None || now >= idle_at) ? Status::Exited : Status::Running;
+
+	case State::ResetPrompt:
+		if (e == button::Event::Long)
+		{
+			printk("[UI] factory reset confirmed\n");
+			return Status::FactoryReset;
+		}
 		return (e != button::Event::None || now >= idle_at) ? Status::Exited : Status::Running;
 	}
 	return Status::Exited; // unreachable; a new state must be handled above

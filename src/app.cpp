@@ -143,6 +143,13 @@ static void app_loop()
 					// The retained CO2 value predates the correction, so the next read must be a full
 					tick_count = 0;
 				}
+				else if (status == menu::Status::FactoryReset && hooks.factory_reset)
+				{
+					// Leaves the screen as it is: the hook reboots us, and a device that is
+					// about to lose its network should not spend its last second drawing.
+					printk("[UI] factory reset\n");
+					hooks.factory_reset();
+				}
 				else
 				{
 					ui::show_sensor();
