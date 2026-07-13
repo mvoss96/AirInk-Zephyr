@@ -12,7 +12,7 @@
  * recovers. The spread WITHIN a burst answers (1); the drift BETWEEN bursts answers
  * (2). Prints every sample so nothing is hidden behind a mean.
  *
- *   west build -b promicro_nrf52840/nrf52840 -p always -- -DAPP_ENTRY=batt_seed
+ *   west build -b promicro_nrf52840/nrf52840 apps/standalone -p always -- -DAPP_ENTRY=batt_seed
  */
 #include <zephyr/kernel.h>
 #include <zephyr/drivers/adc.h>

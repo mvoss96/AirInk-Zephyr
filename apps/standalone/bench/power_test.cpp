@@ -1,10 +1,10 @@
 /** @file
- * Power characterization harness -- firmware that REPLACES src/main.cpp.
+ * Power characterization harness -- firmware that REPLACES apps/standalone/main.cpp.
  *
  * Measures one consumer at a time on the PPK2. Not a test suite; it needs the real
  * board.
  *
- *   west build -b promicro_nrf52840/nrf52840 -p -- -DAPP_ENTRY=power_test
+ *   west build -b promicro_nrf52840/nrf52840 apps/standalone -p -- -DAPP_ENTRY=power_test
  *
  * Pick the consumer with TEST_MODE below, rebuild, flash, measure. Results are written
  * up in docs/power-analysis.md. MODE_IDLE is the mode worth keeping: re-measure the

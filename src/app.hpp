@@ -9,9 +9,9 @@
  * ties them together. Everything the product does when nobody is holding the button.
  *
  * This is a module rather than a main() because it has two callers. The standalone
- * firmware runs it as its only thread (src/main.cpp). The Matter build runs it on a
+ * firmware runs it as its only thread (apps/standalone/main.cpp). The Matter build runs it on a
  * thread of its own, alongside the CHIP event loop and OpenThread, and taps the hooks
- * below to publish the same numbers over Thread (matter/src/app_task.cpp).
+ * below to publish the same numbers over Thread (apps/matter/src/app_task.cpp).
  *
  * The loop owns the panel: LVGL is not thread-safe, and nothing outside run()'s thread
  * may call ui::. A caller that wants to change what is on screen -- the Matter build

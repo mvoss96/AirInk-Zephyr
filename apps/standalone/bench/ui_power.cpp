@@ -1,10 +1,10 @@
 /** @file
- * What the interactive screens cost -- firmware that REPLACES src/main.cpp.
+ * What the interactive screens cost -- firmware that REPLACES apps/standalone/main.cpp.
  *
  * The button cannot be pressed by a script, so this harness walks into the states
  * directly. Measure on the PPK2; results belong in docs/power-analysis.md.
  *
- *   west build -b promicro_nrf52840/nrf52840 -p always -- -DAPP_ENTRY=ui_power
+ *   west build -b promicro_nrf52840/nrf52840 apps/standalone -p always -- -DAPP_ENTRY=ui_power
  *
  * MODE_CALIB deliberately does NOT send the forced recalibration. Running an FRC in
  * indoor air would teach the sensor that ~800 ppm is fresh outdoor air, permanently.

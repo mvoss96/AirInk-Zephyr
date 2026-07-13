@@ -1,11 +1,30 @@
 {
+    // One configuration per application (see apps/). Switch with the picker in the status bar,
+    // or via "C/C++: Select a Configuration...".
+    //
+    // compileCommands gives IntelliSense the real include paths and defines, so Zephyr headers
+    // resolve; forcedInclude pulls in the generated autoconf.h, so CONFIG_* symbols are defined
+    // and the "#warning ... must be enabled by CONFIG_X" guards stop firing. Both point INTO a
+    // build directory -- the paths below assume tools/flash.ps1's layout (build/<app>), so build
+    // once before expecting IntelliSense to work.
     "configurations": [
         {
-            "name": "Zephyr",
-            "compileCommands": "${workspaceFolder}/build/AirInk/compile_commands.json",
+            "name": "Zephyr (standalone)",
+            "compileCommands": "${workspaceFolder}/build/standalone/standalone/compile_commands.json",
             "compilerPath": "C:/ncs/toolchains/dcbdc366a1/opt/zephyr-sdk/gnu/arm-zephyr-eabi/bin/arm-zephyr-eabi-gcc.exe",
             "forcedInclude": [
-                "${workspaceFolder}/build/AirInk/zephyr/include/generated/zephyr/autoconf.h"
+                "${workspaceFolder}/build/standalone/standalone/zephyr/include/generated/zephyr/autoconf.h"
+            ],
+            "cStandard": "c11",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "windows-gcc-arm"
+        },
+        {
+            "name": "Zephyr (matter)",
+            "compileCommands": "${workspaceFolder}/build/matter/matter/compile_commands.json",
+            "compilerPath": "C:/ncs/toolchains/dcbdc366a1/opt/zephyr-sdk/gnu/arm-zephyr-eabi/bin/arm-zephyr-eabi-gcc.exe",
+            "forcedInclude": [
+                "${workspaceFolder}/build/matter/matter/zephyr/include/generated/zephyr/autoconf.h"
             ],
             "cStandard": "c11",
             "cppStandard": "c++17",

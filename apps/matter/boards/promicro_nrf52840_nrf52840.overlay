@@ -15,7 +15,7 @@
  *   0x000F4000  Adafruit bootloader + settings (48 KB) -- RESERVED, no partition
  */
 
-#include "../../dts/airink_hw.dtsi"
+#include "../../../dts/airink_hw.dtsi"
 
 /delete-node/ &boot_partition;
 /delete-node/ &slot0_partition;

@@ -173,7 +173,7 @@ unnecessary for the no-MCUboot + UF2 path):
 Build from the NCS workspace (see the `zephyr-build-env` memory for the full env prelude):
 
 ```
-west build -b promicro_nrf52840/nrf52840 <repo>/matter -d <builddir> -p always
+west build -b promicro_nrf52840/nrf52840 <repo>/apps/matter -d <builddir> -p always
 ```
 
 Flash via SWD (J-Link, `loadfile` preserves the Adafruit bootloader), or drag-drop the

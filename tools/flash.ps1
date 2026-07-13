@@ -1,9 +1,13 @@
 <#
   AirInk flash + log helper — SWD via SEGGER J-Link (no USB / no bootloader).
 
-  Flashes build\AirInk\zephyr\zephyr.hex with `loadfile`, which sector-erases
-  only the app region (>= 0x1000) and leaves the MBR + Adafruit bootloader
-  intact (NOT a chip-erase). Then resets the core and streams the debug console.
+  Flashes the built zephyr.hex with `loadfile`, which sector-erases only the app
+  region (>= 0x1000) and leaves the MBR + Adafruit bootloader intact (NOT a
+  chip-erase). Then resets the core and streams the debug console.
+
+  The repo holds two applications (see apps/): the standalone firmware and the
+  Matter-over-Thread one. Pick with -App; they build into separate directories, so
+  switching does not force a rebuild of the other.
 
   The nRF is powered by the PPK2 (battery pins) and the J-Link only debugs
   (VTREF sensed from the 3V3 rail) — so a clean current measurement can run in
@@ -12,20 +16,24 @@
   debug-domain residual is left. Flashing + logs are unaffected.
 
   Usage:
-    pwsh -File tools/flash.ps1                 # flash current build + read COM9 20s
-    pwsh -File tools/flash.ps1 -Build          # rebuild first, then flash
-    pwsh -File tools/flash.ps1 -LogSeconds 65  # span a full measurement cycle
-    pwsh -File tools/flash.ps1 -LogPort COM12  # logs via the ESP bridge instead
+    pwsh -File tools/flash.ps1                    # flash current standalone build + read COM9 20s
+    pwsh -File tools/flash.ps1 -Build             # rebuild first, then flash
+    pwsh -File tools/flash.ps1 -App matter -Build # the Matter firmware instead
+    pwsh -File tools/flash.ps1 -LogSeconds 65     # span a full measurement cycle
+    pwsh -File tools/flash.ps1 -LogPort COM12     # logs via the ESP bridge instead
 #>
 param(
+  [ValidateSet("standalone","matter")]
+  [string]$App = "standalone",
   [switch]$Build,
   [int]$LogSeconds = 20,
   [string]$LogPort = "COM9",
   [int]$Speed = 4000
 )
 $ErrorActionPreference = "Stop"
-$root = Split-Path $PSScriptRoot -Parent
-$hex  = Join-Path $root "build\AirInk\zephyr\zephyr.hex"
+$root     = Split-Path $PSScriptRoot -Parent
+$appDir   = Join-Path $root "apps\$App"
+$buildDir = Join-Path $root "build\$App"
 
 if ($Build) {
   $tc = "C:\ncs\toolchains\dcbdc366a1"
@@ -35,12 +43,16 @@ if ($Build) {
   $env:ZEPHYR_SDK_INSTALL_DIR = "$tc\opt\zephyr-sdk"
   $env:NRFUTIL_HOME = "$tc\nrfutil\home"
   $env:ZEPHYR_BASE = "C:\ncs\v3.4.0\zephyr"
-  Push-Location $root
-  try { & "$tc\opt\bin\Scripts\west.exe" build -b promicro_nrf52840/nrf52840 }
-  finally { Pop-Location }
+  & "$tc\opt\bin\Scripts\west.exe" build -b promicro_nrf52840/nrf52840 $appDir -d $buildDir
   if ($LASTEXITCODE -ne 0) { throw "west build failed" }
 }
-if (-not (Test-Path $hex)) { throw "hex not found: $hex (run with -Build first)" }
+
+# Under sysbuild the image lands in <builddir>/<image>/zephyr/. Find it rather than hardcode the
+# image name, which is the application directory's.
+$hex = Get-ChildItem -Path $buildDir -Recurse -Filter zephyr.hex -ErrorAction SilentlyContinue |
+       Where-Object { $_.FullName -notmatch 'mcuboot|b0n|ipc_radio' } | Select-Object -First 1
+if (-not $hex) { throw "no zephyr.hex under $buildDir (run with -Build first)" }
+$hex = $hex.FullName
 
 $jl = "C:\Program Files\SEGGER\JLink\JLink.exe"
 if (-not (Test-Path $jl)) { throw "JLink.exe not found at $jl" }
