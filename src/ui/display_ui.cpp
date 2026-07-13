@@ -328,6 +328,10 @@ namespace
 			return "ZB..";
 		case ui::Link::ZigbeeConnected:
 			return "ZB";
+		case ui::Link::ThreadJoining:
+			return "TH..";
+		case ui::Link::ThreadConnected:
+			return "TH";
 		case ui::Link::None:
 			break;
 		}

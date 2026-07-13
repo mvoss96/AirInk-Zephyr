@@ -25,8 +25,9 @@ namespace ui
 		BleAdv,
 		BleConnected,
 		ZigbeeJoining,
-		ZigbeeConnected
-		// , Thread…
+		ZigbeeConnected,
+		ThreadJoining,
+		ThreadConnected
 	};
 
 	/** Settings-menu entries, in the order they are drawn.

@@ -22,6 +22,7 @@ if(APP_ENTRY STREQUAL "main")
 	# registered behind its back.
 	target_sources(app PRIVATE
 		src/main.cpp
+		src/app.cpp
 		src/menu.cpp
 		src/input/button.cpp
 	)

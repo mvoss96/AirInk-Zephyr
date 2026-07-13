@@ -1,53 +1,127 @@
 /*
- * AirInk Matter bring-up overlay for the promicro/nice!nano nRF52840.
+ * AirInk Matter overlay for the promicro/nice!nano nRF52840.
  *
- * No MCUboot, no external flash. Plain single image linked at 0x1000 -- exactly where
- * the Adafruit UF2 bootloader (top of flash) expects a SoftDevice-less app, the same
- * layout AirInk ships with today. Storage (Matter NVS) sits just below the reserved
- * bootloader region so the app never touches it.
+ * The hardware is AirInk's, so this is app.overlay in the repo root plus a partition map --
+ * same SCD41, same button, same e-paper, same battery divider, same uart0 console. Keep the
+ * two in step; the only intentional differences are called out below.
+ *
+ * No MCUboot, no external flash. Plain single image linked at 0x1000 -- exactly where the
+ * Adafruit UF2 bootloader (top of flash) expects a SoftDevice-less app, the same layout AirInk
+ * ships with today. Storage (Matter NVS) sits just below the reserved bootloader region so the
+ * app never touches it.
  *
  * Flash map (1 MB):
  *   0x00000000  MBR (part of the Adafruit bootloader, already present)
- *   0x00001000  code       -> 0xEB000 = 940 KB   (Matter release ~583 KB fits)
- *   0x000EC000  storage     -> 0x08000 = 32 KB    (Matter fabric NVS)
+ *   0x00001000  code       -> 0xEB000 = 940 KB
+ *   0x000EC000  storage    -> 0x08000 = 32 KB    (Matter fabric NVS)
  *   0x000F4000  Adafruit bootloader + settings (48 KB) -- RESERVED, no partition
  */
 
+#include <zephyr/dt-bindings/gpio/gpio.h>
 #include <zephyr/dt-bindings/input/input-event-codes.h>
 #include <zephyr/dt-bindings/pinctrl/nrf-pinctrl.h>
+#include <zephyr/dt-bindings/adc/adc.h>
+#include <zephyr/dt-bindings/adc/nrf-saadc.h>
+#include <zephyr/dt-bindings/regulator/nrf5x.h>
 
 /delete-node/ &boot_partition;
 /delete-node/ &slot0_partition;
 /delete-node/ &slot1_partition;
 /delete-node/ &storage_partition;
 
+/* REG1 as a DC/DC buck instead of the default LDO: ~2x more efficient at the mA-level active
+ * currents. Needs the on-module DCC inductor populated -- validated on the PPK2. */
+&reg1 {
+	regulator-initial-mode = <NRF5X_REG_MODE_DCDC>;
+};
+
 / {
 	chosen {
 		zephyr,code-partition = &code_partition;
+		zephyr,display = &epaper;
+		/* Console on uart0 (P1.04/P1.06 = COM9), not the board's USB CDC default. */
+		zephyr,console = &uart0;
 	};
 
-	/* DK_LIBRARY (Nrf::GetBoard) wants a gpio-keys node. One button on P0.11, as AirInk. */
-	buttons {
+	keys: buttons {
 		compatible = "gpio-keys";
+
 		button0: button_0 {
+			/* P0.11, pressed = LOW, enable internal pull-up */
 			gpios = <&gpio0 11 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
 			label = "User button";
 			zephyr,code = <INPUT_KEY_0>;
 		};
 	};
 
-	aliases {
-		sw0 = &button0;
+	/* Tap/hold split, as in the standalone app: ENTER on a short press (at release), MENU the
+	 * moment the hold threshold passes. src/input/button.cpp maps the two codes.
+	 *
+	 * Note there is no `sw0` alias here, unlike app.overlay: NCS's DK library would bind to
+	 * this same gpio-keys node with raw GPIO callbacks and disable the pin interrupt while it
+	 * debounces -- which is Zephyr's gpio-keys driver's interrupt too. Only one driver may own
+	 * the button, so the Matter build sets CONFIG_DK_LIBRARY=n (see prj.conf) and the alias
+	 * would be pointless. */
+	longpress: longpress {
+		compatible = "zephyr,input-longpress";
+		input = <&keys>;
+		input-codes = <INPUT_KEY_0>;
+		short-codes = <INPUT_KEY_ENTER>;
+		long-codes = <INPUT_KEY_MENU>;
+		long-delay-ms = <700>;
 	};
 
-	chosen {
-		/* Console on uart0 (P1.04/P1.06 = COM9), not the board's USB CDC default --
-		 * matches AirInk's wiring so the same serial adapter reads Matter's logs. */
-		zephyr,console = &uart0;
+	/* External 3V3 LDO / load-switch on P0.13 (active-high). regulator-boot-on powers the
+	 * sensor and panel rail before their drivers initialise. */
+	ext_3v3: ext-3v3 {
+		compatible = "regulator-fixed";
+		regulator-name = "ext-3v3";
+		enable-gpios = <&gpio0 13 GPIO_ACTIVE_HIGH>;
+		regulator-boot-on;
+		regulator-always-on;
+		startup-delay-us = <10000>;
+	};
+
+	zephyr,user {
+		/* [0] = external divider (P0.31, x4), [1] = internal VDDH/5 (x5) */
+		io-channels = <&adc 0>, <&adc 1>;
+	};
+
+	/* GoodDisplay GDEY042T81 (4.2", SSD1683) via the vendored ssd16xx driver.
+	 * Geometry: width = gate axis (300), height = source axis (400). rotation=270 puts the
+	 * 400-source axis horizontal (byte-packed) and the 300 gates vertical -> a full 400x300
+	 * canvas with no /8 shear. BUSY is active-HIGH. Empty full{}/partial{} = OTP waveforms;
+	 * partial{} being present is what enables fast partial refresh. */
+	mipi_dbi_epaper {
+		compatible = "zephyr,mipi-dbi-spi";
+		spi-dev = <&spi2>;
+		dc-gpios = <&gpio0 9 GPIO_ACTIVE_HIGH>;
+		reset-gpios = <&gpio0 29 GPIO_ACTIVE_LOW>;
+		write-only;
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		epaper: ssd1683@0 {
+			compatible = "solomon,ssd1683";
+			reg = <0>;
+			mipi-max-frequency = <4000000>;
+			width = <300>;
+			height = <400>;
+			busy-gpios = <&gpio0 2 GPIO_ACTIVE_HIGH>;
+			tssv = <0x80>;
+			rotation = <270>;
+
+			full {
+			};
+
+			partial {
+			};
+		};
 	};
 };
 
 &pinctrl {
+	/* uart0's board default pins are P0.09/P0.10, which the display uses for DC/CS. */
 	uart0_default_alt: uart0_default_alt {
 		group1 {
 			psels = <NRF_PSEL(UART_TX, 1, 4)>,
@@ -62,19 +136,8 @@
 			low-power-enable;
 		};
 	};
-};
 
-&uart0 {
-	status = "okay";
-	current-speed = <115200>;
-	pinctrl-0 = <&uart0_default_alt>;
-	pinctrl-1 = <&uart0_sleep_alt>;
-	pinctrl-names = "default", "sleep";
-};
-
-/* SCD41 on i2c0, remapped to SCL=P0.22 / SDA=P0.24 (AirInk wiring; frees P0.11 for the
- * button). Single-shot mode (2), as AirInk. The Matter app reads SENSOR_CHAN_AMBIENT_TEMP. */
-&pinctrl {
+	/* i2c0's board default puts SCL on P0.11, which is the button. */
 	i2c0_default: i2c0_default {
 		group1 {
 			psels = <NRF_PSEL(TWIM_SCL, 0, 22)>,
@@ -91,6 +154,14 @@
 	};
 };
 
+&uart0 {
+	status = "okay";
+	current-speed = <115200>;
+	pinctrl-0 = <&uart0_default_alt>;
+	pinctrl-1 = <&uart0_sleep_alt>;
+	pinctrl-names = "default", "sleep";
+};
+
 &i2c0 {
 	status = "okay";
 	pinctrl-0 = <&i2c0_default>;
@@ -100,17 +171,36 @@
 	scd41: scd41@62 {
 		compatible = "sensirion,scd41";
 		reg = <0x62>;
-		/* Normal periodic (0), not single-shot: the sample reads in a CHIP-thread
-		 * ScheduleWork, so a ~5 s single-shot fetch would stall Matter. Periodic reads
-		 * are fast. (Single-shot + a worker thread is the later power refinement.) */
-		mode = <0>;
+		/* Single-shot (2), as the standalone app: a full CO2 read blocks ~5 s, but it runs
+		 * on AirInk's own thread now, not on the CHIP event loop, so nothing starves. It is
+		 * also what the forced-recalibration flow needs. */
+		mode = <2>;
 	};
 };
 
-/* Battery sensing, straight from AirInk's app.overlay: two SAADC channels, read by
- * src/sensors/battery.cpp and published to the Matter PowerSource cluster on endpoint 0.
- *   [0] external divider on P0.31 (300k/100k -> V_bat/4)
- *   [1] SoC-internal VDDH/5 -- only compared against [0] to detect USB charging. */
+/* SPI2 for the e-paper: SCK=P1.11, MOSI=P1.13 (write-only, no MISO), CS=P0.10 */
+&spi2_default {
+	group1 {
+		psels = <NRF_PSEL(SPIM_SCK, 1, 11)>,
+			<NRF_PSEL(SPIM_MOSI, 1, 13)>;
+	};
+};
+
+&spi2_sleep {
+	group1 {
+		psels = <NRF_PSEL(SPIM_SCK, 1, 11)>,
+			<NRF_PSEL(SPIM_MOSI, 1, 13)>;
+		low-power-enable;
+	};
+};
+
+&spi2 {
+	status = "okay";
+	cs-gpios = <&gpio0 10 GPIO_ACTIVE_LOW>;
+};
+
+/* Battery: ch0 = external divider on P0.31/AIN7 (300k/100k -> V_bat/4), the gauge.
+ * ch1 = internal VDDH/5, read only to compare against ch0 -- on USB, VDDH sits above BAT+. */
 &adc {
 	#address-cells = <1>;
 	#size-cells = <0>;
@@ -133,13 +223,6 @@
 		zephyr,input-positive = <NRF_SAADC_VDDHDIV5>;
 		zephyr,resolution = <12>;
 		zephyr,oversampling = <4>;
-	};
-};
-
-/ {
-	zephyr,user {
-		/* [0] = external divider (P0.31, x4), [1] = internal VDDH/5 (x5) */
-		io-channels = <&adc 0>, <&adc 1>;
 	};
 };
 

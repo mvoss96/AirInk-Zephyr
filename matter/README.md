@@ -9,16 +9,62 @@ memory `matter-zigbee-plan` for the full roadmap.
 
 ## Status (verified on hardware, 2026-07-13)
 
+- **The whole device, plus Matter.** The e-paper UI, the menu and the forced-recalibration flow
+  all run exactly as in the standalone firmware -- `app::run()` is the same code -- and the same
+  readings go out over Thread.
 - **Commissioned into Home Assistant over Thread.** Both fabrics (the phone's and HA's
   multi-admin share) commit cleanly.
 - Boots as an **OpenThread Sleepy End Device**, BLE-advertises for commissioning.
   Onboarding: pairing code **`3535-860-0323`**, discriminator 3840, passcode **528722**.
-- Publishes everything the SCD41 measures (i2c0, P0.22/P0.24), plus the battery:
-  temperature, relative humidity, CO2 (ppm), a CO2-derived air quality level, and the
-  PowerSource state. One 30 s tick reads and publishes all of it.
-- Footprint: FLASH ~693 KB, **RAM ~187 KB → ~69 KB free** (Debug, 40 KB CHIP heap). The four
-  extra clusters cost ~400 B of RAM.
+- Publishes everything the SCD41 measures, plus the battery: temperature, relative humidity,
+  CO2 (ppm), a CO2-derived air quality level, and the PowerSource state.
+- Footprint: FLASH ~927 KB of the 940 KB code partition, **RAM ~247 KB of 256 KB (~15 KB free)**.
+  Tight, and deliberately so -- see below.
 - Console on **uart0 = COM9** (P1.04/P1.06), not the board's USB CDC default.
+
+## Threads
+
+`main` runs the CHIP task queue and nothing else. Everything AirInk does -- the panel, the
+SCD41, the button, the menu -- runs on **its own thread** (`app::run()`, see `src/app.hpp`),
+because a full CO2 single-shot blocks for ~5 s and an e-paper refresh for ~2 s, and neither may
+sit on the CHIP event loop while OpenThread waits to poll its parent.
+
+Direction of travel is one-way: AirInk measures and hands each reading to Matter (the hooks in
+`app::Hooks`, which take the CHIP stack lock). Matter never reaches back into the UI -- LVGL is
+not thread-safe, so the network state is left in a variable (`app::set_link()`) that the loop
+picks up on its next cycle.
+
+**`CONFIG_DK_LIBRARY=n`.** The DK library drives a development kit's buttons and LEDs; we have
+one button and no status LEDs, and that button already belongs to Zephyr's gpio-keys +
+input-longpress drivers. Two owners on one pin is not a style question -- the DK library takes
+raw GPIO callbacks and *disables the pin interrupt* while it debounces, which is the same
+interrupt gpio-keys is using. (Turning it off also retires the sample's "LED index out of the
+range" boot error.)
+
+## RAM
+
+RAM, not flash, is what this build is short of, and every number below was measured rather than
+guessed. The merge overflowed by 34 KB on the first link. What paid for it:
+
+| | |
+|---|---|
+| `clip_buf` in the vendored ssd16xx driver | **−20 KB** |
+| `CONFIG_LV_Z_MEM_POOL_SIZE` 48 KB → 24 KB | −24 KB |
+| `CONFIG_MAIN_STACK_SIZE` 6 KB → 3 KB | −3 KB |
+| `CONFIG_CHIP_TASK_STACK_SIZE` 8 KB → 6 KB | −2 KB |
+
+The first one was not a trim but a bug: `clip_buf` is a page-compaction scratch buffer sized for
+the largest panel the driver supports, and it is only ever used in the **portrait** orientations.
+AirInk is landscape, so 20 KB of BSS sat there untouched -- in the standalone firmware too. It is
+now compiled only when a configured panel could need it.
+
+The LVGL pool is trimmed to its measured peak plus headroom: `ui::log_pool()` reports
+`peak 17644 of 24576 B` at boot, when every view is resident. If you add a view or a bigger font,
+**read that line** -- running the pool dry is an MPU fault in `lv_draw_label`, not a graceful
+failure.
+
+`CONFIG_CHIP_MALLOC_SYS_HEAP_SIZE` stays at 40 KB. It looks like an obvious 8 KB to reclaim; it
+is not (see commissioning trap 5 below).
 
 ## Data model (src/default_zap/airink.zap)
 

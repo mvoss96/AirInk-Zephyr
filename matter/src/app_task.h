@@ -6,16 +6,18 @@
 
 #pragma once
 
-#include "board/board.h"
-
 #include <platform/CHIPDeviceLayer.h>
 
-struct Identify;
-
-#ifndef CONFIG_NCS_SAMPLE_MATTER_USE_DEFAULT_BUTTON_HANDLER
-enum class ButtonState { None, SoftwareUpdate, UAT };
-#endif
-
+/** Brings up Matter, then hands the device itself to AirInk.
+ *
+ * StartApp() runs the CHIP task queue on the main thread forever. Everything AirInk does --
+ * the panel, the SCD41, the button, the menu -- runs on a thread of its own (app::run(), see
+ * src/app.hpp), because a full CO2 read blocks for ~5 s and an e-paper refresh for ~2 s, and
+ * neither may sit on the CHIP event loop while OpenThread waits to poll its parent.
+ *
+ * Direction of travel: AirInk measures, and hands each reading to Matter. Matter never reaches
+ * back into the UI -- the network state is left where the loop picks it up (app::set_link()).
+ */
 class AppTask {
 public:
 	static AppTask &Instance()
@@ -28,18 +30,4 @@ public:
 
 private:
 	CHIP_ERROR Init();
-	k_timer mTimer;
-
-	/* One tick reads the SCD41 (temperature, humidity, CO2) and the battery, then publishes
-	 * all of it. Matches AirInk's own 30 s cycle. The sensor is in periodic mode, so a read
-	 * returns immediately -- unlike AirInk's single-shot path, which blocks ~5 s and would
-	 * stall the CHIP thread this timer's work runs on. */
-	static constexpr uint32_t kMeasurementIntervalMs = 30000;
-
-	static void MeasurementTimeoutCallback(k_timer *timer);
-
-	/* Runs on the CHIP thread (via ScheduleWork): reads the sensors and writes the clusters. */
-	static void PublishMeasurements();
-
-	static void ButtonEventHandler(Nrf::ButtonState state, Nrf::ButtonMask hasChanged);
 };

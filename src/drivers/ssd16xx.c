@@ -33,6 +33,20 @@ LOG_MODULE_REGISTER(ssd16xx);
 #define SSD16XX_DEFAULT_TR_VALUE	25U
 #define SSD16XX_TR_SCALE_FACTOR		256U
 
+/*
+ * AirInk: gate clipping (see ssd16xx_write) compacts each page into a scratch buffer, and that
+ * buffer has to be sized for the largest panel the driver supports -- 20 KB of BSS. Clipping
+ * only ever happens in the portrait orientations, though: in landscape the buffer width already
+ * equals the gate count, so there is nothing to strip and the frame goes out untouched. A
+ * landscape-only board (AirInk is one) was carrying 20 KB it never addressed, which is most of
+ * what the Matter build is short of. Compile the buffer, and the branch that uses it, only when
+ * some configured panel could actually need it.
+ */
+#define SSD16XX_INST_MAY_CLIP(inst)                                                                \
+	(DT_INST_PROP_OR(inst, rotation, 0) == 0) ||                                               \
+	(DT_INST_PROP_OR(inst, rotation, 0) == 180) ||
+#define SSD16XX_ANY_MAY_CLIP (DT_INST_FOREACH_STATUS_OKAY(SSD16XX_INST_MAY_CLIP) 0)
+
 
 enum ssd16xx_profile_type {
 	SSD16XX_PROFILE_FULL = 0,
@@ -451,6 +465,7 @@ static int ssd16xx_write(const struct device *dev, const uint16_t x,
 	 * on the source/height axis.
 	 */
 	const bool clip_gates =
+		SSD16XX_ANY_MAY_CLIP &&
 		(data->orientation == DISPLAY_ORIENTATION_NORMAL ||
 		 data->orientation == DISPLAY_ORIENTATION_ROTATED_180) &&
 		desc->width > gates;
@@ -487,6 +502,7 @@ static int ssd16xx_write(const struct device *dev, const uint16_t x,
 		return err;
 	}
 
+#if SSD16XX_ANY_MAY_CLIP
 	if (clip_gates) {
 		/*
 		 * Buffer rows are desc->width (e.g. 304) bytes wide, but only the
@@ -509,7 +525,9 @@ static int ssd16xx_write(const struct device *dev, const uint16_t x,
 		if (err < 0) {
 			return err;
 		}
-	} else {
+	} else
+#endif
+	{
 		err = ssd16xx_write_cmd(dev, SSD16XX_CMD_WRITE_RAM, (uint8_t *)buf,
 					buf_len);
 		if (err < 0) {
