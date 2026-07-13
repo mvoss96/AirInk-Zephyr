@@ -4,13 +4,10 @@
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
-#include <zephyr/pm/device.h>
 
 #include "input/button.hpp"
 #include "menu.hpp"
 #include "version.hpp"
-
-static const struct device *const console_dev = DEVICE_DT_GET(DT_CHOSEN(zephyr_console));
 
 static constexpr int TICK_MS = 30000;			// How often a measurement cycle runs
 static constexpr uint32_t CO2_EVERY_TICKS = 10; // Every tenth cycle is a full CO2 read; the others are T+RH only
@@ -183,21 +180,17 @@ static void app_loop()
 		// so this cannot spin.
 		const int64_t wake_at = menu_active ? menu::deadline_ms() : next_measure;
 
-		/* A live console UARTE keeps the HFCLK running: ~1 mA against a ~60 uA idle floor. So we
-		 * power it down while we sleep -- but only where the console is ours alone to switch off.
+		/* The console used to be powered down by hand here: an enabled UARTE holds the HFCLK on
+		 * (~650 uA against a ~60 uA floor), and this was the one place that knew we were about to
+		 * sleep. It only ever worked in a build where nothing else logged -- the Matter one writes
+		 * to the console from the CHIP and OpenThread threads while we wait here, so the suspend
+		 * could not be applied there at all.
 		 *
-		 * The condition is CONFIG_LOG, not CONFIG_CHIP: what makes the console someone else's is
-		 * that another thread writes to it while we wait here, and that is exactly what the
-		 * logging subsystem is. The Matter build enables it; the standalone one does not; and the
-		 * Matter *power* build (apps/matter/power.conf) turns it off, which hands the console back
-		 * to us without changing a line of this. */
-#ifndef CONFIG_LOG
-		pm_device_action_run(console_dev, PM_DEVICE_ACTION_SUSPEND);
-#endif
+		 * It is gone. CONFIG_PM_DEVICE_RUNTIME (conf/airink_hw.conf) has the UARTE driver suspend
+		 * itself after every line and resume for the next, which is both finer-grained and correct
+		 * in every build. Measured with full CHIP logging: idle floor ~705 uA before, ~62 uA after.
+		 */
 		e = button::wait_until(wake_at);
-#ifndef CONFIG_LOG
-		pm_device_action_run(console_dev, PM_DEVICE_ACTION_RESUME);
-#endif
 
 		if (e != button::Event::None)
 		{

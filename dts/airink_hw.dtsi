@@ -100,8 +100,22 @@
 	};
 };
 
+/*
+ * The promicro board DTS downgrades i2c0 and spi2 to the legacy, DMA-less TWI/SPI drivers. Put
+ * them back on the SoC's own defaults. Two reasons, and the second one is the surprising one:
+ *
+ *  - DMA. The 15 KB framebuffer flush and every sensor transaction went through the CPU byte by
+ *    byte.
+ *  - Power. TWI and SPI are the only nRF serial drivers that do NOT participate in device runtime
+ *    PM -- they never call pm_device_runtime_get(), so with CONFIG_PM_DEVICE_RUNTIME they touch a
+ *    suspended peripheral and assert (nrfx_twi.c:312). TWIM and SPIM do the get/put, which is what
+ *    lets the console UARTE power itself down between log lines: measured, the console's idle cost
+ *    fell from ~650 uA to ~7 uA. See docs/power-analysis.md.
+ */
 &i2c0 {
 	status = "okay";
+	compatible = "nordic,nrf-twim";
+	zephyr,pm-device-runtime-auto;
 
 	scd41: scd41@62 {
 		compatible = "sensirion,scd41";
@@ -142,6 +156,12 @@
 	pinctrl-0 = <&uart0_default_alt>;
 	pinctrl-1 = <&uart0_sleep_alt>;
 	pinctrl-names = "default", "sleep";
+
+	/* An enabled UARTE holds the HFCLK on -- ~650 uA, whether or not anything is listening. With
+	 * runtime PM the driver enables it for the duration of a line and suspends it again, so the
+	 * console costs the bytes it actually sends and nothing else. This is what replaced the manual
+	 * suspend/resume the loop used to do around its sleep. */
+	zephyr,pm-device-runtime-auto;
 };
 
 /* Remap SPI2 to the e-paper wiring: SCK=P1.11, MOSI=P1.13 (write-only, no MISO) */
@@ -162,6 +182,8 @@
 
 &spi2 {
 	status = "okay";
+	compatible = "nordic,nrf-spim"; /* not the board's legacy SPI -- see &i2c0 above */
+	zephyr,pm-device-runtime-auto;
 	cs-gpios = <&gpio0 10 GPIO_ACTIVE_LOW>;
 };
 
@@ -228,6 +250,7 @@
 &adc {
 	#address-cells = <1>;
 	#size-cells = <0>;
+	zephyr,pm-device-runtime-auto;
 
 	channel@0 {
 		reg = <0>;

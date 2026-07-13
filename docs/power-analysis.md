@@ -311,3 +311,65 @@ west build -b promicro_nrf52840/nrf52840 apps/matter -d <dir> \
 Flash it, then **power-cycle via the PPK2** rather than resetting over SWD, or the debug domain
 stays powered and the idle floor is a fiction. The Zephyr boot banner still comes out (it goes
 through `printk`, not the logging subsystem), which is how you know the board came up at all.
+
+---
+
+# The console was never the price of having a console (2026-07-13)
+
+The measurements above kept saying "the logging costs ~650 µA, so the Matter build cannot afford a
+console". That framing was wrong, and the question that broke it was: *why can't we have UART
+without the penalty?*
+
+An enabled UARTE holds the HFCLK on. That is the cost — **enabled**, not **transmitting**. It does
+not matter whether anything is listening; the shipped device pays it too. The standalone firmware
+worked around it by suspending the console by hand around its sleep, which is why it idled at 60 µA
+and the Matter build (where CHIP logs *while* we sleep) could not.
+
+Zephyr already has the right mechanism: **device runtime PM** (`CONFIG_PM_DEVICE_RUNTIME`). The
+nrfx UARTE driver calls `pm_device_runtime_put_async()` when its TX stops, so the peripheral is
+enabled for the microseconds of a line and suspended in between.
+
+It asserted on the first try — `ASSERTION FAIL @ nrfx_twi.c:312`. The reason is worth writing down:
+
+> **The promicro board DTS downgrades i2c0 and spi2 to the legacy `nordic,nrf-twi` and
+> `nordic,nrf-spi`.** Those are the only nRF serial drivers that do *not* participate in device
+> runtime PM — they never call `pm_device_runtime_get()`, so they touch a suspended peripheral and
+> assert. `dts/airink_hw.dtsi` now puts both back on the SoC's own defaults, TWIM and SPIM, which
+> are DMA-based and do the get/put. (Which also means the 15 KB framebuffer flush and every sensor
+> transaction had been going through the CPU byte by byte.)
+
+## Result: full logging, and the low floor
+
+| | idle floor (probe-corrected) |
+|---|---|
+| Matter, full CHIP logging, legacy drivers | ~705 µA |
+| Matter, full CHIP logging, **runtime PM + DMA** | **~60 µA** |
+| Matter, logging off entirely (power.conf) | 55 µA |
+
+**Logging now costs about 7 µA.** `apps/matter/power.conf` is no longer a measurement crutch — it
+is worth about 5 µA, and the shipped firmware keeps its console.
+
+`app.cpp`'s hand-rolled console suspend is deleted. The driver does it per line, in every build.
+
+## The shipping profile
+
+Matter over Thread, full logging, 300 s, one CO₂ read, one panel refresh. Probe-corrected
+average **~343 µA** (149.3 mAs / 5 min):
+
+| | share of time | charge |
+|---|---|---|
+| **e-paper refresh** | 0.2 % | **39 %** |
+| idle floor (~60 µA) | 92 % | 41 % |
+| **sensor + CPU** (the 5 s CO₂ read) | 1.8 % | **14 %** |
+| Thread radio | 0.8 % | 3 % |
+
+**~122 days on a 1000 mAh cell, ~243 on 2000 mAh.**
+
+The remaining levers are the two the device chooses for itself: how often it refreshes the panel,
+and how often it reads CO₂. Neither is a bug.
+
+> **Rig warning, learned the hard way.** An attached J-Link adds **~155 µA** to the measured floor
+> (measured: identical firmware, probe in 859.5 µA vs probe out 699.8 µA). Every idle figure taken
+> with the probe attached is that much too high — which is exactly how a 60 µA floor was mistaken
+> for 230 µA and blamed first on Matter and then on the panel. Unplug SWD for any absolute idle
+> number; the offset is only good enough for A/B iteration.
