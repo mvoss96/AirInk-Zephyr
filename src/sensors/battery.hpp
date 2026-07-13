@@ -40,6 +40,22 @@ namespace battery
 	 */
 	int init();
 
+	/** Call back the instant USB power appears or disappears.
+	 *
+	 * read() detects charging on the raw voltages, so it is never stale -- but the loop only
+	 * calls it once per 30 s cycle, which is how long the charging bolt used to linger on the
+	 * panel after the cable was pulled. This is the missing half: the SoC's POWER peripheral
+	 * raises USBDETECTED/USBREMOVED the moment VBUS moves, so the loop can be woken instead of
+	 * polled. Costs nothing while nothing happens.
+	 *
+	 * @param on_change runs in the POWER interrupt: wake somebody, touch nothing else
+	 *
+	 * @retval 0       VBUS events will be delivered
+	 * @retval -errno  the POWER peripheral refused; the bolt then updates on the next cycle,
+	 *                 as it always did
+	 */
+	int watch_supply(void (*on_change)());
+
 	/** Read both channels and derive the state.
 	 *
 	 * The first call seeds the smoothing filter, so it already returns a settled value

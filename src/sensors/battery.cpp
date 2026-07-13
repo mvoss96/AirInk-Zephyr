@@ -6,8 +6,30 @@
 #include <zephyr/kernel.h>
 #include <zephyr/drivers/adc.h>
 
+#include <hal/nrf_power.h>
+#include <nrfx_power.h>
+
 namespace
 {
+	// Whoever wants to know the moment the cable moves. Null until watch_supply().
+	void (*supply_cb)();
+
+	/** The SoC saw VBUS appear or disappear.
+	 *
+	 * Runs in the POWER interrupt (shared with the clock driver, which is what already owns
+	 * the vector), so it does the one thing an ISR may do here: hand the news on. Reading the
+	 * ADC or touching the panel from here would be a fault.
+	 */
+	void on_usb_evt(nrfx_power_usb_evt_t event)
+	{
+		// READY means the USB regulator settled; the cable did not move, so nothing to say.
+		if (event == NRFX_POWER_USB_EVT_READY || supply_cb == nullptr)
+		{
+			return;
+		}
+		supply_cb();
+	}
+
 	// [0] = external divider (P0.31, x4), [1] = internal VDDH/5 (x5).
 	const struct adc_dt_spec ch_ext = ADC_DT_SPEC_GET_BY_IDX(DT_PATH(zephyr_user), 0);
 	const struct adc_dt_spec ch_int = ADC_DT_SPEC_GET_BY_IDX(DT_PATH(zephyr_user), 1);
@@ -89,6 +111,37 @@ int battery::init()
 	{
 		return err;
 	}
+	return 0;
+}
+
+int battery::watch_supply(void (*on_change)())
+{
+	supply_cb = on_change;
+
+	/* nrfx_power_init() writes DCDCEN and DCDCEN_VDDH from its config -- it is not just an
+	 * "enable the module" call. Zephyr has already set both (the board's regulator nodes /
+	 * CONFIG_BOARD_ENABLE_DCDC), and handing it a zeroed config would switch the DC/DC
+	 * converters back off, which is a power regression measured in hundreds of microamps. So
+	 * read the state back out of the peripheral and pass it through unchanged: init then
+	 * writes exactly what is already there.
+	 */
+	nrfx_power_config_t cfg{};
+	cfg.dcdcen = nrf_power_dcdcen_get(NRF_POWER);
+#if NRF_POWER_HAS_DCDCEN_VDDH
+	cfg.dcdcenhv = nrf_power_dcdcen_vddh_get(NRF_POWER);
+#endif
+
+	// -EALREADY only means somebody got here first, which is fine: the DC/DC settings are then
+	// theirs, and they are the same ones.
+	const int err = nrfx_power_init(&cfg);
+	if (err != 0 && err != -EALREADY)
+	{
+		return -EIO;
+	}
+
+	const nrfx_power_usbevt_config_t evt_cfg = { .handler = on_usb_evt };
+	nrfx_power_usbevt_init(&evt_cfg);
+	nrfx_power_usbevt_enable();
 	return 0;
 }
 

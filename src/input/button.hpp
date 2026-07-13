@@ -1,5 +1,7 @@
 #pragma once
 #include <stdint.h>
+#include <zephyr/kernel.h> // k_msgq, for queue() below: naming it inside the namespace without
+						   // the real declaration would define a *new* type, button::k_msgq
 
 /** @file
  * The single user button (P0.11), classified into two gestures.
@@ -41,4 +43,12 @@ namespace button
 	 * @return the gesture, or Event::None if the deadline passed first
 	 */
 	Event wait_until(int64_t deadline_ms);
+
+	/** The queue the gestures land in.
+	 *
+	 * For a caller that has to wait on more than the button -- app.cpp also wakes on the USB
+	 * cable -- and therefore cannot simply block in wait_until(). k_poll() this, then take the
+	 * gesture with wait_until(0).
+	 */
+	k_msgq *queue();
 }

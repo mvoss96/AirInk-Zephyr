@@ -114,6 +114,49 @@ static void measure()
 	tick_count++;
 }
 
+/* Raised from the POWER interrupt when the USB cable moves. */
+static K_SEM_DEFINE(supply_changed, 0, 1);
+
+static void on_supply_change()
+{
+	k_sem_give(&supply_changed);
+}
+
+/** Sleep until something worth redrawing happens, or until the deadline.
+ *
+ * Two things count as something: the button, and the USB cable. The cable matters because the
+ * charging bolt is on screen, and a bolt that takes half a minute to go out after the cable is
+ * pulled reads as a bug, not as a cadence -- charging is detected on the raw voltages, so it was
+ * never stale; the panel simply had nobody to tell it.
+ *
+ * Polling for it would have cost current every cycle for an event that happens twice a week. The
+ * SoC raises USBDETECTED/USBREMOVED on its own, so we wait for it instead, and the caller does
+ * what it does anyway on every pass: read the battery, stage it, refresh. An early wake needs no
+ * special case -- it just makes the next pass happen sooner.
+ *
+ * @param deadline_ms absolute k_uptime_get() value; already past means "just take what is queued"
+ * @return the gesture, or Event::None -- which is also what a cable wake looks like
+ */
+static button::Event wait(int64_t deadline_ms)
+{
+	const int64_t now = k_uptime_get();
+	if (deadline_ms > now)
+	{
+		struct k_poll_event ev[2];
+		k_poll_event_init(&ev[0], K_POLL_TYPE_MSGQ_DATA_AVAILABLE, K_POLL_MODE_NOTIFY_ONLY,
+						  button::queue());
+		k_poll_event_init(&ev[1], K_POLL_TYPE_SEM_AVAILABLE, K_POLL_MODE_NOTIFY_ONLY,
+						  &supply_changed);
+		k_poll(ev, ARRAY_SIZE(ev), K_MSEC(deadline_ms - now));
+	}
+
+	// The cable wake carries no information beyond "look again", and looking again is what the
+	// caller is about to do. Consume it so it cannot wake us a second time.
+	k_sem_take(&supply_changed, K_NO_WAIT);
+
+	return button::wait_until(0); // a gesture if k_poll found one; None otherwise
+}
+
 /** A device that has never joined anything boots to its own onboarding code.
  *
  * The readings are not what a factory-new device is for: nobody has told it where to send them, and
@@ -163,7 +206,7 @@ static void onboarding()
 
 		ui::refresh(); // only actually repaints when the battery moved
 
-		if (button::wait_until(k_uptime_get() + TICK_MS) != button::Event::None)
+		if (wait(k_uptime_get() + TICK_MS) != button::Event::None)
 		{
 			printk("[MTR] onboarding code dismissed\n");
 			if (hooks.pairing_dismissed)
@@ -259,7 +302,7 @@ static void app_loop()
 		 * itself after every line and resume for the next, which is both finer-grained and correct
 		 * in every build. Measured with full CHIP logging: idle floor ~705 uA before, ~62 uA after.
 		 */
-		e = button::wait_until(wake_at);
+		e = wait(wake_at);
 
 		if (e != button::Event::None)
 		{
@@ -293,6 +336,12 @@ void app::run()
 	if (battery::init() < 0)
 	{
 		printk("Battery ADC not ready (continuing without it)\n");
+	}
+	else if (battery::watch_supply(on_supply_change) < 0)
+	{
+		// Survivable: the bolt then appears and clears on the next cycle, up to 30 s late,
+		// which is how it behaved before this existed.
+		printk("Battery: no VBUS events; the charging bolt will lag by a cycle\n");
 	}
 	if (button::init() < 0)
 	{

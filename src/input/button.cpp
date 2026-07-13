@@ -96,6 +96,11 @@ int button::init()
 	return 0;
 }
 
+k_msgq *button::queue()
+{
+	return &gesture_q;
+}
+
 button::Event button::wait_until(int64_t deadline_ms)
 {
 	const int64_t now = k_uptime_get();
