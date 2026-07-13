@@ -31,22 +31,43 @@ namespace ui
 	};
 
 	/** Settings-menu entries, in the order they are drawn.
-	 * Units and a factory reset belong here too, but both need a persistent store
-	 * that does not exist yet. A calibration lives inside the sensor, so it needs none.
+	 *
+	 * Not every entry exists in every build: Pairing is only there when init() was given
+	 * onboarding codes, i.e. when the device has a radio to be paired over. Ask menu_has()
+	 * before offering one -- the entries that are absent are not drawn and must not be
+	 * reachable with the cursor either.
+	 *
+	 * Units and a factory reset belong here too, but both need a persistent store that does
+	 * not exist yet. A calibration lives inside the sensor, so it needs none.
 	 */
 	enum class Menu : uint8_t
 	{
 		Calibrate,
+		Pairing,
 		Exit,
 		Count
 	};
 
 	/** Build all widgets and show the boot splash (one full refresh).
 	 *
+	 * @param pair_qr     Matter onboarding payload ("MT:..."), rendered as a QR code, or NULL
+	 *                    in a build with no radio -- then there is no pairing view and no menu
+	 *                    entry leading to one
+	 * @param pair_manual the same code for humans ("1234-567-8901"), shown under the QR for
+	 *                    when a camera will not cooperate; ignored if pair_qr is NULL
+	 *
 	 * @retval 0   the panel is ready and the splash is on screen
 	 * @retval -1  no display; every other function here becomes a no-op
 	 */
-	int init();
+	int init(const char *pair_qr = nullptr, const char *pair_manual = nullptr);
+
+	/** Whether a menu entry exists in this build. See Menu. */
+	bool menu_has(Menu entry);
+
+	/** Select the pairing view: the QR code and the manual code given to init().
+	 * A no-op when init() was given none.
+	 */
+	void show_pairing();
 
 	/** Stage the battery indicator, shown on every view.
 	 *

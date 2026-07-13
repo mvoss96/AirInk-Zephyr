@@ -19,6 +19,10 @@ static uint16_t last_co2_ppm;					// held on screen between the five-minute CO2 
 
 static app::Hooks hooks;
 
+// Not copied: they are string literals or static buffers owned by the caller (see app.hpp).
+static const char *pair_qr;
+static const char *pair_manual;
+
 // Written by any thread, read by the loop. A plain enum store is atomic on this core, and
 // a stale read costs nothing worse than one cycle of a stale indicator.
 static ui::Link link_state = ui::Link::None;
@@ -26,6 +30,12 @@ static ui::Link link_state = ui::Link::None;
 void app::set_hooks(const Hooks &h)
 {
 	hooks = h;
+}
+
+void app::set_pairing_codes(const char *qr, const char *manual)
+{
+	pair_qr = qr;
+	pair_manual = manual;
 }
 
 void app::set_link(ui::Link state)
@@ -170,7 +180,7 @@ static void app_loop()
 
 void app::run()
 {
-	const bool display_ok = (ui::init() == 0);
+	const bool display_ok = (ui::init(pair_qr, pair_manual) == 0);
 
 	printk("AirInk v%s (%s %s) started (display %s)\n",
 		   AIRINK_VERSION, __DATE__, __TIME__, display_ok ? "ok" : "FAILED");

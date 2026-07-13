@@ -5,6 +5,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <lvgl.h>
 
 /* The one place that reaches into LVGL's Zephyr heap shim. Only the target build can
@@ -44,7 +45,8 @@ namespace
 	constexpr int FULL_REFRESH_EVERY = 100;
 	// The entries are centred as a block, so adding one keeps the menu balanced.
 	constexpr int MENU_ITEM_H = 48;
-	constexpr int MENU_TOP = (CONTENT_H - (int)ui::Menu::Count * MENU_ITEM_H) / 2;
+	/* The entries are centred as a block, so a build with fewer of them stays balanced. */
+	inline int menu_top(int rows) { return (CONTENT_H - rows * MENU_ITEM_H) / 2; }
 
 	constexpr int BAR_W = 300, BAR_H = 32, BAR_BORDER = 3;
 	constexpr int BAR_INNER_W = BAR_W - 2 * BAR_BORDER;
@@ -102,6 +104,17 @@ namespace
 	lv_obj_t *menu_root, *menu_cursor;
 	lv_obj_t *menu_item[(int)ui::Menu::Count];
 
+	/* Which menu entries this build has, and where each one sits. A build with no radio has
+	 * nothing to pair over, so it gets no Pairing entry -- and the entries below it move up,
+	 * which is why the row is looked up rather than computed from the enum. -1 = absent. */
+	int menu_row[(int)ui::Menu::Count];
+	int menu_rows;
+
+	/* The pairing view. The QR canvas is an I1 (1-bit indexed) draw buffer that lv_qrcode
+	 * allocates from the LVGL pool when we hand it the payload -- so a build without codes
+	 * never pays for it. */
+	lv_obj_t *pair_root, *pair_qr_obj, *pair_code_lbl;
+
 	/* The two calibration steps share one set of widgets. They still get one View each,
 	 * so the step change is a view change and thus a full refresh -- the big DSEG7
 	 * digits appearing would ghost badly under a partial one. Within the countdown the
@@ -120,6 +133,7 @@ namespace
 		VIEW_LOWBAT,
 		VIEW_RESET,
 		VIEW_MENU,
+		VIEW_PAIRING,
 		VIEW_CALIB_PROMPT,
 		VIEW_CALIB_PROGRESS
 	};
@@ -287,7 +301,7 @@ namespace
 	 */
 	bool transient(View v)
 	{
-		return v == VIEW_MENU || v == VIEW_CALIB_PROMPT ||
+		return v == VIEW_MENU || v == VIEW_PAIRING || v == VIEW_CALIB_PROMPT ||
 			   v == VIEW_CALIB_PROGRESS || v == VIEW_RESET;
 	}
 
@@ -305,6 +319,7 @@ namespace
 		case VIEW_LOWBAT: return lowbat_root;
 		case VIEW_RESET:  return reset_root;
 		case VIEW_MENU:   return menu_root;
+		case VIEW_PAIRING: return pair_root;
 		case VIEW_CALIB_PROMPT:
 		case VIEW_CALIB_PROGRESS: return calib_root;
 		default:          return boot_root;
@@ -553,8 +568,16 @@ namespace
 		lv_obj_align(hint, LV_ALIGN_CENTER, 0, 72);
 	}
 
-	/** Build the settings menu: a header, one label per entry, a moving cursor. */
-	void build_menu(lv_obj_t *scr)
+	/** Build the settings menu: a header, one label per entry, a moving cursor.
+	 *
+	 * Only the entries this build has: Pairing is skipped when there are no onboarding codes,
+	 * and the entries below it move up. menu_row[] records where each one landed, so the
+	 * cursor and the highlight bar agree with what is drawn.
+	 *
+	 * @param scr           the active screen
+	 * @param with_pairing  whether the Pairing entry exists
+	 */
+	void build_menu(lv_obj_t *scr, bool with_pairing)
 	{
 		menu_root = make_view(scr);
 
@@ -565,26 +588,81 @@ namespace
 		lv_obj_t *rule = make_divider(menu_root, CONTENT_W - 48, 1);
 		lv_obj_align(rule, LV_ALIGN_TOP_MID, 0, 32);
 
+		static const char *const names[] = {"Calibrate CO2", "Pairing code", "Exit"};
+		static_assert(sizeof(names) / sizeof(names[0]) == (size_t)ui::Menu::Count,
+					  "every menu entry needs a label");
+
+		menu_rows = 0;
+		for (int i = 0; i < (int)ui::Menu::Count; i++)
+		{
+			const bool present = with_pairing || i != (int)ui::Menu::Pairing;
+			menu_row[i] = present ? menu_rows++ : -1;
+		}
+
 		// The cursor is created before the labels so they draw on top of it: a
 		// selected entry is white text on the black bar, which is the only way to
 		// mark a selection without a glyph B612's ASCII subset does not have.
 		menu_cursor = make_divider(menu_root, CONTENT_W - 32, MENU_ITEM_H);
-		lv_obj_set_pos(menu_cursor, 16, MENU_TOP);
-
-		static const char *const names[] = {"Calibrate CO2", "Exit"};
-		static_assert(sizeof(names) / sizeof(names[0]) == (size_t)ui::Menu::Count,
-					  "every menu entry needs a label");
+		lv_obj_set_pos(menu_cursor, 16, menu_top(menu_rows));
 
 		for (int i = 0; i < (int)ui::Menu::Count; i++)
 		{
+			if (menu_row[i] < 0)
+			{
+				menu_item[i] = nullptr;
+				continue;
+			}
 			menu_item[i] = make_label(menu_root, &b612_28, CONTENT_W - 32);
 			lv_label_set_text(menu_item[i], names[i]);
-			lv_obj_set_pos(menu_item[i], 16, MENU_TOP + i * MENU_ITEM_H + 7);
+			lv_obj_set_pos(menu_item[i], 16, menu_top(menu_rows) + menu_row[i] * MENU_ITEM_H + 7);
 		}
 
 		lv_obj_t *hint = make_label(menu_root, &b612_14, CONTENT_W);
 		lv_label_set_text(hint, "Tap = next     Hold = select");
 		lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -8);
+	}
+
+	/** Build the pairing view: the onboarding QR, with the manual code under it.
+	 *
+	 * The QR is the whole point -- a camera reads it in a second -- but it is also the thing
+	 * most likely to fail: a dirty lens, a bad angle, a controller that insists on typing. So
+	 * the human-readable code sits below it, always, not behind a second screen.
+	 *
+	 * lv_qrcode renders into an I1 (1-bit indexed) draw buffer, which is exactly this panel's
+	 * format: no dithering, no anti-aliasing, every module a whole pixel block. The buffer is
+	 * allocated from the LVGL pool the moment we hand it the payload, and it is sized by the
+	 * payload -- so this view is not free, and ui::log_pool() at boot is where you see what it
+	 * cost.
+	 *
+	 * @param scr    the active screen
+	 * @param qr     the onboarding payload ("MT:...")
+	 * @param manual the same code for humans, drawn below the QR
+	 */
+	void build_pairing(lv_obj_t *scr, const char *qr, const char *manual)
+	{
+		pair_root = make_view(scr);
+
+		lv_obj_t *hdr = make_label(pair_root, &b612_16, CONTENT_W);
+		lv_label_set_text(hdr, "PAIRING CODE");
+		lv_obj_align(hdr, LV_ALIGN_TOP_MID, 0, 6);
+
+		/* Sized so the module grid lands on whole pixels: the Matter payload is ~22 chars,
+		 * which QR encodes at 29x29 modules, and 174 = 6 px per module. A quiet zone is not
+		 * drawn -- the panel around it is white, which is the same thing. */
+		pair_qr_obj = lv_qrcode_create(pair_root);
+		lv_qrcode_set_size(pair_qr_obj, 174);
+		lv_qrcode_set_dark_color(pair_qr_obj, lv_color_black());
+		lv_qrcode_set_light_color(pair_qr_obj, lv_color_white());
+		lv_qrcode_update(pair_qr_obj, qr, strlen(qr));
+		lv_obj_align(pair_qr_obj, LV_ALIGN_TOP_MID, 0, 32);
+
+		pair_code_lbl = make_label(pair_root, &b612_28, CONTENT_W);
+		lv_label_set_text(pair_code_lbl, manual);
+		lv_obj_align(pair_code_lbl, LV_ALIGN_BOTTOM_MID, 0, -26);
+
+		lv_obj_t *hint = make_label(pair_root, &b612_14, CONTENT_W);
+		lv_label_set_text(hint, "Tap to go back");
+		lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -6);
 	}
 
 	/** Build the shared calibration skeleton: title, progress bar, body, hint. */
@@ -644,7 +722,7 @@ namespace
 
 } // namespace
 
-int ui::init()
+int ui::init(const char *pair_qr, const char *pair_manual)
 {
 	if (!plat::display_ready())
 	{
@@ -671,16 +749,38 @@ int ui::init()
 	h = log_built("lowbat", h);
 	build_reset(scr);
 	h = log_built("reset", h);
-	build_menu(scr);
+	build_menu(scr, pair_qr != nullptr);
 	h = log_built("menu", h);
 	build_calib(scr);
-	log_built("calib", h);
+	h = log_built("calib", h);
+	/* Only when there is something to pair over -- otherwise no view, and the QR's draw buffer
+	 * (the largest single allocation in the pool) is never made. */
+	if (pair_qr)
+	{
+		build_pairing(scr, pair_qr, pair_manual ? pair_manual : "");
+		log_built("pairing", h);
+	}
 	ready = true;
 
 	// Boot splash: pending_view is VIEW_BOOT and shown is VIEW_NONE, so refresh()
 	// paints it with a full refresh.
 	ui::refresh();
 	return 0;
+}
+
+bool ui::menu_has(Menu entry)
+{
+	return ready && menu_row[(int)entry] >= 0;
+}
+
+void ui::show_pairing()
+{
+	if (!ready || !pair_root)
+	{
+		return;
+	}
+	pending_view = VIEW_PAIRING;
+	dirty = true;
 }
 
 void ui::show_sensor()
@@ -860,12 +960,20 @@ void ui::set_menu(Menu selected)
 		return; // same entry already highlighted
 	}
 
+	if (menu_row[sel] < 0)
+	{
+		return; // an entry this build does not have; menu.cpp must not select it
+	}
+
 	for (int i = 0; i < (int)Menu::Count; i++)
 	{
-		lv_obj_set_style_text_color(menu_item[i],
-									(i == sel) ? lv_color_white() : lv_color_black(), 0);
+		if (menu_item[i])
+		{
+			lv_obj_set_style_text_color(menu_item[i],
+										(i == sel) ? lv_color_white() : lv_color_black(), 0);
+		}
 	}
-	lv_obj_set_y(menu_cursor, MENU_TOP + sel * MENU_ITEM_H);
+	lv_obj_set_y(menu_cursor, menu_top(menu_rows) + menu_row[sel] * MENU_ITEM_H);
 
 	last_menu_sel = sel;
 	dirty = true;

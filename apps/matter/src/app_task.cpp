@@ -19,6 +19,8 @@
 #include <app/clusters/air-quality-server/air-quality-server.h>
 #include <app/clusters/concentration-measurement-server/concentration-measurement-server.h>
 #include <app/clusters/power-source-server/power-source-server.h>
+#include <setup_payload/OnboardingCodesUtil.h>
+#include <setup_payload/QRCodeSetupPayloadGenerator.h>
 
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
@@ -143,6 +145,29 @@ void MatterEventHandler(const ChipDeviceEvent *event, intptr_t)
 	}
 }
 
+/* The onboarding codes, fetched once from CHIP. Static because app::set_pairing_codes() does not
+ * copy them and the UI holds the pointers for the life of the device. */
+char sQrCode[chip::QRCodeBasicSetupPayloadGenerator::kMaxQRCodeBase38RepresentationLength + 1];
+char sManualCode[chip::kManualSetupLongCodeCharLength + 1];
+
+/* What a controller needs to find and authenticate this device -- the same payload the sample
+ * prints to the log at boot, but printed on the e-paper, where the user actually is. It does not
+ * change over the device's life, so read it once and hand it to the UI. */
+void FetchOnboardingCodes()
+{
+	chip::MutableCharSpan qr(sQrCode);
+	chip::MutableCharSpan manual(sManualCode);
+	const chip::RendezvousInformationFlags rendezvous(chip::RendezvousInformationFlag::kBLE);
+
+	if (GetQRCode(qr, rendezvous) != CHIP_NO_ERROR ||
+	    GetManualPairingCode(manual, rendezvous) != CHIP_NO_ERROR) {
+		LOG_ERR("Could not read the onboarding codes; no pairing screen");
+		return;
+	}
+
+	::app::set_pairing_codes(sQrCode, sManualCode);
+}
+
 void AirInkThread(void *, void *, void *)
 {
 	const ::app::Hooks hooks = { .reading = PublishReading, .battery = PublishBattery };
@@ -185,6 +210,10 @@ CHIP_ERROR AppTask::Init()
 CHIP_ERROR AppTask::StartApp()
 {
 	ReturnErrorOnFailure(Init());
+
+	/* Before the thread starts: app::run() reads the codes when it builds the UI, and whether
+	 * there are any is what decides that the menu has a pairing entry at all. */
+	FetchOnboardingCodes();
 
 	k_thread_create(&sAirInkThread, sAirInkStack, K_THREAD_STACK_SIZEOF(sAirInkStack), AirInkThread,
 			nullptr, nullptr, nullptr, K_PRIO_PREEMPT(10), 0, K_NO_WAIT);

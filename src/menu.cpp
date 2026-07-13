@@ -29,7 +29,8 @@ namespace
 		Root,
 		CalibPrompt,
 		CalibRun,
-		CalibFailed
+		CalibFailed,
+		Pairing
 	};
 
 	State state = State::Root;
@@ -46,6 +47,7 @@ namespace
 		case State::CalibPrompt: return "calib-prompt";
 		case State::CalibRun: return "calib-run";
 		case State::CalibFailed: return "calib-failed";
+		case State::Pairing: return "pairing";
 		default: return "root";
 		}
 	}
@@ -61,6 +63,33 @@ namespace
 			printk("[UI] menu %s -> %s\n", name(state), name(next));
 		}
 		state = next;
+	}
+
+	/** Advance the cursor to the next entry this build actually has.
+	 *
+	 * A build with no radio has no Pairing entry -- it is not drawn, so the cursor must not
+	 * stop on it either, or a tap would appear to do nothing.
+	 */
+	ui::Menu next_entry(ui::Menu from)
+	{
+		ui::Menu e = from;
+		do
+		{
+			e = (ui::Menu)(((int)e + 1) % (int)ui::Menu::Count);
+		} while (!ui::menu_has(e) && e != from);
+		return e;
+	}
+
+	/** Show the onboarding QR and the manual code, until the user has had enough.
+	 *
+	 * Nothing is being decided here, so any gesture dismisses it -- and so does the idle
+	 * timeout, because a pairing code left on an e-paper panel is a code left on display.
+	 */
+	void to_pairing()
+	{
+		go(State::Pairing);
+		idle_at = k_uptime_get() + PROMPT_IDLE_MS;
+		ui::show_pairing();
 	}
 
 	void to_calib_prompt()
@@ -213,6 +242,9 @@ menu::Status menu::proceed(button::Event e)
 		return Status::Running;
 
 	case State::CalibFailed:
+		return (e != button::Event::None || now >= idle_at) ? Status::Exited : Status::Running;
+
+	case State::Pairing:
 		return (e != button::Event::None || now >= idle_at) ? Status::Exited : Status::Running;
 	}
 	return Status::Exited; // unreachable; a new state must be handled above

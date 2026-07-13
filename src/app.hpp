@@ -39,6 +39,20 @@ namespace app
 	/** Install the observers. Call before run(). */
 	void set_hooks(const Hooks &hooks);
 
+	/** Install the device's onboarding codes. Call before run().
+	 *
+	 * With them, the menu offers a "Pairing code" entry that puts the QR and the manual code on
+	 * the panel. Without them -- a build with no radio -- that entry does not exist, and neither
+	 * does the view or the QR's draw buffer. So this is what decides it, not a compile switch:
+	 * the menu offers pairing when there is something to pair with.
+	 *
+	 * The strings are not copied. They must outlive run(), which never returns.
+	 *
+	 * @param qr     the onboarding payload ("MT:...")
+	 * @param manual the same code for humans ("1234-567-8901")
+	 */
+	void set_pairing_codes(const char *qr, const char *manual);
+
 	/** Report the radio state for the status bar, from any thread.
 	 *
 	 * Only records the value -- the panel belongs to run()'s thread, which puts it up on
