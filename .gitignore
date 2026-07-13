@@ -1,4 +1,6 @@
-build*/
+# Zephyr build trees. Anything with "build" in the name, at any depth: apps/*/build (where both
+# west and the nRF Connect extension put theirs) and any scratch tree next to them.
+*build*/
 sim/out/
 
 # Local MCP config (machine-specific absolute paths to the ppk2-mcp server)

@@ -213,3 +213,64 @@ the raw 100 kHz CSV (`scratchpad/analyze.py`, range-switch glitches filtered):
 
 See also the memory notes: `power-active-energy`, `power-idle-breakdown`,
 `swd-flash-loop`.
+
+---
+
+# Matter over Thread (2026-07-13)
+
+The same device, plus a Thread radio. Measured on the PPK2 at 3.7 V (source mode, no USB),
+across a 300 s window — ten measurement cycles, one of them a full CO₂ read.
+
+## You cannot measure a device that is talking
+
+The first number was 1.3 mA average, 620 µA idle. That number is nearly worthless: it is
+mostly the console. A live console UARTE holds the HFCLK on, and the Matter build is the loud
+one — CHIP logs every message it sends and receives.
+
+Rebuilt with the logging off (`apps/matter/power.conf`), which also hands the console back to
+the loop so it powers the UART down between cycles:
+
+| | logging on | logging off |
+|---|---|---|
+| average | 1.3 mA | **525 µA** |
+| idle floor | 620 µA | **~230 µA** |
+
+**Over half the current was the log.** Every number below is from the quiet build.
+
+## Where the charge goes
+
+157.6 mAs over 300 s, i.e. an average of **525 µA**:
+
+| | share of time | charge | share of charge |
+|---|---|---|---|
+| standing current (~230 µA) | 97 % | 69 mAs | **44 %** |
+| e-paper refresh | 0.2 % | 59 mAs | **38 %** |
+| sensor + CPU (incl. one 5 s CO₂ read) | 2.2 % | 27 mAs | 17 % |
+| Thread radio | 0.7 % | 2.6 mAs | **2 %** |
+
+**The radio is not the problem.** The SED polls its parent every 5 s — two bursts of ~50 ms,
+peaking around 11 mA — and the whole of that costs 2 % of the budget. The Thread stack is
+cheap; what it brought with it is not.
+
+## The two levers, in order
+
+1. **The standing current: ~230 µA, against the standalone firmware's 60 µA.** The device
+   spends 97 % of its life here, and it is 44 % of the charge. Something in the Matter build
+   keeps a high-power domain alive between polls — this has **not** been decomposed yet, and
+   until it is, every other optimisation is rearranging deck chairs. Suspects: the ICD poll
+   configuration, the HFCLK not being released between radio wakeups, a peripheral (SAADC,
+   TWIM) left enabled.
+2. **The e-paper refresh: 38 % of the charge in 0.2 % of the time.** Unchanged from the
+   standalone analysis, where it was also the dominant active cost. The lever remains refresh
+   *frequency*, not refresh type.
+
+## Reproducing
+
+```
+west build -b promicro_nrf52840/nrf52840 apps/matter -d <dir> \
+    -- -Dmatter_EXTRA_CONF_FILE=<abs>/apps/matter/power.conf
+```
+
+Flash it, then **power-cycle via the PPK2** rather than resetting over SWD, or the debug domain
+stays powered and the idle floor is a fiction. The Zephyr boot banner still comes out (it goes
+through `printk`, not the logging subsystem), which is how you know the board came up at all.

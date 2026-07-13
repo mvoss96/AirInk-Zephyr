@@ -183,15 +183,19 @@ static void app_loop()
 		// so this cannot spin.
 		const int64_t wake_at = menu_active ? menu::deadline_ms() : next_measure;
 
-#ifndef CONFIG_CHIP
-		// A live console UARTE keeps the HFCLK running: ~1 mA versus the ~60 uA idle floor.
-		// Not in the Matter build: there the console is not ours to switch off -- the CHIP
-		// and OpenThread threads log while we wait here, and the radio dominates the budget
-		// anyway. Power for that build is its own exercise.
+		/* A live console UARTE keeps the HFCLK running: ~1 mA against a ~60 uA idle floor. So we
+		 * power it down while we sleep -- but only where the console is ours alone to switch off.
+		 *
+		 * The condition is CONFIG_LOG, not CONFIG_CHIP: what makes the console someone else's is
+		 * that another thread writes to it while we wait here, and that is exactly what the
+		 * logging subsystem is. The Matter build enables it; the standalone one does not; and the
+		 * Matter *power* build (apps/matter/power.conf) turns it off, which hands the console back
+		 * to us without changing a line of this. */
+#ifndef CONFIG_LOG
 		pm_device_action_run(console_dev, PM_DEVICE_ACTION_SUSPEND);
 #endif
 		e = button::wait_until(wake_at);
-#ifndef CONFIG_CHIP
+#ifndef CONFIG_LOG
 		pm_device_action_run(console_dev, PM_DEVICE_ACTION_RESUME);
 #endif
 
