@@ -252,17 +252,54 @@ the loop so it powers the UART down between cycles:
 peaking around 11 mA — and the whole of that costs 2 % of the budget. The Thread stack is
 cheap; what it brought with it is not.
 
-## The two levers, in order
+## The standing current is not Matter's — and it is not 60 µA any more
 
-1. **The standing current: ~230 µA, against the standalone firmware's 60 µA.** The device
-   spends 97 % of its life here, and it is 44 % of the charge. Something in the Matter build
-   keeps a high-power domain alive between polls — this has **not** been decomposed yet, and
-   until it is, every other optimisation is rearranging deck chairs. Suspects: the ICD poll
-   configuration, the HFCLK not being released between radio wakeups, a peripheral (SAADC,
-   TWIM) left enabled.
-2. **The e-paper refresh: 38 % of the charge in 0.2 % of the time.** Unchanged from the
-   standalone analysis, where it was also the dominant active cost. The lever remains refresh
-   *frequency*, not refresh type.
+I first wrote that Matter added ~170 µA of standing current, comparing against the 60 µA idle
+figure from the analysis above. That was wrong, and the way it was wrong is worth recording.
+
+Measured on the same rig, same session, both freshly power-cycled:
+
+| | floor (5th pct) | median |
+|---|---|---|
+| standalone firmware | 218.5 µA | 230.9 µA |
+| Matter, no logging | 218.5 µA | 230.5 µA |
+| Matter, no logging, **no BLE** | 218.1 µA | 230.5 µA |
+
+**All three are identical.** Matter adds nothing to the standing current, and neither does the
+BLE controller — that experiment (CONFIG_BT=n, still commissioned, still on Thread) was run
+precisely to blame it, and it exonerated it.
+
+The standing current is also perfectly flat: sampled at 100 kHz, the 3.6 s between two Thread
+polls sits at 236–239 µA with no structure at all. It is a DC draw, not the average of many
+small wakeups — which also means **the 5 s poll interval is not the lever**. Lengthening it
+would trim the 2 % the radio costs, not the 44 % the floor costs.
+
+So the standing current is the *device's*, and it is ~230 µA rather than the 60 µA this document
+claims above. Either that number regressed, or it was measured under conditions that do not hold
+today. Note the caveat already written above about the bench harnesses idling at ~236 µA — the
+same number — because they never power the SCD41 down. But the firmware does call
+`scd41::power_down()` after every read, and it still measures 230 µA.
+
+**Prime suspect: the e-paper panel is never put to sleep.** The vendored ssd16xx driver
+implements `PM_DEVICE_ACTION_SUSPEND` — it sends the panel's deep-sleep command — and *nothing in
+the firmware ever calls it*. An SSD1683 left in normal mode after a refresh draws on this order.
+Not yet proven; it is the next experiment.
+
+> **A warning about how not to test this.** Reading the nRF's `HFCLKSTAT` over SWD to see whether
+> the 64 MHz clock was stuck on returned "running" — for the standalone firmware too, which idles
+> at the same current either way. Attaching the debugger powers the debug domain and starts the
+> HFCLK. The register read measures the J-Link, not the device. Peripheral `ENABLE` registers are
+> still meaningful (UARTE0 and TWIM0 read 0, so the console suspend and the sensor power-down both
+> do work); clock and power state, over SWD, are not.
+
+## The levers, in order
+
+1. **The standing current: ~230 µA, in both builds.** 97 % of the time, 44 % of the charge. Not
+   Matter's, not BLE's, not the poll interval's. Chase the panel.
+2. **The e-paper refresh: 38 % of the charge in 0.2 % of the time.** Unchanged from the analysis
+   above, where it was also the dominant active cost. The lever remains refresh *frequency*, not
+   refresh type.
+3. **Matter itself: 2 %.** The radio is not the problem.
 
 ## Reproducing
 
