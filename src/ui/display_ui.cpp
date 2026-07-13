@@ -113,7 +113,7 @@ namespace
 	/* The pairing view. The QR canvas is an I1 (1-bit indexed) draw buffer that lv_qrcode
 	 * allocates from the LVGL pool when we hand it the payload -- so a build without codes
 	 * never pays for it. */
-	lv_obj_t *pair_root, *pair_qr_obj, *pair_code_lbl, *pair_state_lbl, *pair_hint;
+	lv_obj_t *pair_root, *pair_qr_obj, *pair_code_lbl, *pair_state_lbl;
 
 	/* The two calibration steps share one set of widgets. They still get one View each,
 	 * so the step change is a view change and thus a full refresh -- the big DSEG7
@@ -587,9 +587,10 @@ namespace
 	 * cursor and the highlight bar agree with what is drawn.
 	 *
 	 * @param scr           the active screen
-	 * @param with_pairing  whether the Pairing entry exists
+	 * @param with_matter   whether the Matter entry exists
+	 * @param with_reset    whether the Factory reset entry exists
 	 */
-	void build_menu(lv_obj_t *scr, bool with_pairing)
+	void build_menu(lv_obj_t *scr, bool with_matter, bool with_reset)
 	{
 		menu_root = make_view(scr);
 
@@ -600,15 +601,18 @@ namespace
 		lv_obj_t *rule = make_divider(menu_root, CONTENT_W - 48, 1);
 		lv_obj_align(rule, LV_ALIGN_TOP_MID, 0, 32);
 
-		static const char *const names[] = {"Calibrate CO2", "Matter", "Exit"};
+		static const char *const names[] = {"Calibrate CO2", "Matter", "Factory reset", "Exit"};
 		static_assert(sizeof(names) / sizeof(names[0]) == (size_t)ui::Menu::Count,
 					  "every menu entry needs a label");
+
+		const bool present[] = {true, with_matter, with_reset, true};
+		static_assert(sizeof(present) / sizeof(present[0]) == (size_t)ui::Menu::Count,
+					  "every menu entry needs to say whether it exists");
 
 		menu_rows = 0;
 		for (int i = 0; i < (int)ui::Menu::Count; i++)
 		{
-			const bool present = with_pairing || i != (int)ui::Menu::Pairing;
-			menu_row[i] = present ? menu_rows++ : -1;
+			menu_row[i] = present[i] ? menu_rows++ : -1;
 		}
 
 		// The cursor is created before the labels so they draw on top of it: a
@@ -672,15 +676,17 @@ namespace
 		lv_label_set_text(pair_code_lbl, manual);
 		lv_obj_align(pair_code_lbl, LV_ALIGN_BOTTOM_MID, 0, -26);
 
-		/* The other half of the same screen: once on a fabric there is nothing to scan, so the
-		 * QR gives way to the state -- and to the one thing left to do here, leave the network. */
+		/* The other half of the same screen: once on a fabric there is nothing to scan, so the QR
+		 * gives way to the state. Nothing to do here either -- leaving the network is its own
+		 * menu entry, not a gesture hidden on a screen that reads like a status line. */
 		pair_state_lbl = make_label(pair_root, &b612_48, CONTENT_W);
 		lv_label_set_text(pair_state_lbl, "CONNECTED");
 		lv_obj_align(pair_state_lbl, LV_ALIGN_CENTER, 0, -10);
 		lv_obj_add_flag(pair_state_lbl, LV_OBJ_FLAG_HIDDEN);
 
-		pair_hint = make_label(pair_root, &b612_14, CONTENT_W);
-		lv_obj_align(pair_hint, LV_ALIGN_BOTTOM_MID, 0, -6);
+		lv_obj_t *hint = make_label(pair_root, &b612_14, CONTENT_W);
+		lv_label_set_text(hint, "Tap to go back");
+		lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -6);
 	}
 
 	/** Build the shared calibration skeleton: title, progress bar, body, hint. */
@@ -740,7 +746,7 @@ namespace
 
 } // namespace
 
-int ui::init(const char *pair_qr, const char *pair_manual)
+int ui::init(const char *pair_qr, const char *pair_manual, bool with_factory_reset)
 {
 	if (!plat::display_ready())
 	{
@@ -767,7 +773,7 @@ int ui::init(const char *pair_qr, const char *pair_manual)
 	h = log_built("lowbat", h);
 	build_reset(scr);
 	h = log_built("reset", h);
-	build_menu(scr, pair_qr != nullptr);
+	build_menu(scr, pair_qr != nullptr, with_factory_reset);
 	h = log_built("menu", h);
 	build_calib(scr);
 	h = log_built("calib", h);
@@ -807,9 +813,6 @@ void ui::show_matter(bool commissioned)
 	}
 	show_qr ? lv_obj_add_flag(pair_state_lbl, LV_OBJ_FLAG_HIDDEN)
 			: lv_obj_clear_flag(pair_state_lbl, LV_OBJ_FLAG_HIDDEN);
-
-	// The hold only means something once there is a network to leave.
-	lv_label_set_text(pair_hint, show_qr ? "Tap to go back" : "Tap = back     Hold = factory reset");
 
 	pending_view = VIEW_PAIRING;
 	dirty = true;

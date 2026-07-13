@@ -198,7 +198,10 @@ static void app_loop()
 
 void app::run()
 {
-	const bool display_ok = (ui::init(pair_qr, pair_manual) == 0);
+	// What the menu offers is decided here, by what the caller actually gave us: a Matter entry
+	// where there are codes to show, a Factory reset entry where there is something to reset.
+	const bool display_ok =
+		(ui::init(pair_qr, pair_manual, hooks.factory_reset != nullptr) == 0);
 
 	printk("AirInk v%s (%s %s) started (display %s)\n",
 		   AIRINK_VERSION, __DATE__, __TIME__, display_ok ? "ok" : "FAILED");

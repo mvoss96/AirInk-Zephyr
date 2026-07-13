@@ -86,9 +86,8 @@ namespace
 
 	/** The Matter screen: the QR while there is something to scan, the state once there is not.
 	 *
-	 * A tap leaves, always. A hold means something only on the connected half, where the one
-	 * thing left to do is leave the network -- and that goes through a confirmation, because it
-	 * cannot be undone.
+	 * It only ever tells you something, so any gesture dismisses it. Leaving the network is a
+	 * menu entry of its own -- not a gesture hidden on a screen that reads like a status line.
 	 */
 	void to_matter()
 	{
@@ -97,7 +96,7 @@ namespace
 		ui::show_matter(app::commissioned());
 	}
 
-	/** Ask before dropping every fabric.
+	/** Ask before dropping every network the device is on.
 	 *
 	 * The same safety net as the calibration prompt, for the same reason: one button, and an
 	 * answer that cannot be taken back. Tap is the reflex, so tap is the harmless one.
@@ -215,8 +214,11 @@ menu::Status menu::proceed(button::Event e)
 			case ui::Menu::Calibrate:
 				to_calib_prompt();
 				break;
-			case ui::Menu::Pairing:
+			case ui::Menu::Matter:
 				to_matter();
+				break;
+			case ui::Menu::FactoryReset:
+				to_reset_prompt();
 				break;
 			default:
 				return Status::Exited;
@@ -268,15 +270,8 @@ menu::Status menu::proceed(button::Event e)
 		return (e != button::Event::None || now >= idle_at) ? Status::Exited : Status::Running;
 
 	case State::Matter:
-		// A hold is the way out of the network -- but only when there is one to leave. On the
-		// QR half it means nothing, so it does what a tap does: leave the screen.
-		if (e == button::Event::Long && app::commissioned())
-		{
-			to_reset_prompt();
-			return Status::Running;
-		}
-		// An onboarding code left on an e-paper panel is a code left on display, so the idle
-		// timeout matters here as much as the gesture.
+		// Nothing is being decided here, so any gesture dismisses it -- and so does the idle
+		// timeout, because an onboarding code left on an e-paper panel is a code left on display.
 		return (e != button::Event::None || now >= idle_at) ? Status::Exited : Status::Running;
 
 	case State::ResetPrompt:

@@ -32,18 +32,19 @@ namespace ui
 
 	/** Settings-menu entries, in the order they are drawn.
 	 *
-	 * Not every entry exists in every build: Pairing is only there when init() was given
-	 * onboarding codes, i.e. when the device has a radio to be paired over. Ask menu_has()
-	 * before offering one -- the entries that are absent are not drawn and must not be
-	 * reachable with the cursor either.
+	 * Not every entry exists in every build, and what exists is decided by what init() was given,
+	 * not by a compile switch: Matter needs onboarding codes to show, FactoryReset needs something
+	 * to reset. A build with no radio has neither. Ask menu_has() before offering one -- an entry
+	 * that is absent is not drawn and must not be reachable with the cursor either.
 	 *
-	 * Units and a factory reset belong here too, but both need a persistent store that does
-	 * not exist yet. A calibration lives inside the sensor, so it needs none.
+	 * Units belong here too, but they need a persistent store that does not exist yet. A
+	 * calibration lives inside the sensor, so it needs none.
 	 */
 	enum class Menu : uint8_t
 	{
 		Calibrate,
-		Pairing,
+		Matter,
+		FactoryReset,
 		Exit,
 		Count
 	};
@@ -55,11 +56,14 @@ namespace ui
 	 *                    entry leading to one
 	 * @param pair_manual the same code for humans ("1234-567-8901"), shown under the QR for
 	 *                    when a camera will not cooperate; ignored if pair_qr is NULL
+	 * @param with_factory_reset whether there is anything to reset -- if not, the menu does not
+	 *                    offer it
 	 *
 	 * @retval 0   the panel is ready and the splash is on screen
 	 * @retval -1  no display; every other function here becomes a no-op
 	 */
-	int init(const char *pair_qr = nullptr, const char *pair_manual = nullptr);
+	int init(const char *pair_qr = nullptr, const char *pair_manual = nullptr,
+			 bool with_factory_reset = false);
 
 	/** Whether a menu entry exists in this build. See Menu. */
 	bool menu_has(Menu entry);
