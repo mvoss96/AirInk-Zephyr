@@ -7,15 +7,54 @@ field-update story AirInk uses today. This is the Stage 2 + Stage 3 bring-up sna
 eventual goal is to merge AirInk's e-paper UI in (Stage 5). See the plan and the project
 memory `matter-zigbee-plan` for the full roadmap.
 
-## Status (verified on hardware, 2026-07-12)
+## Status (verified on hardware, 2026-07-13)
 
+- **Commissioned into Home Assistant over Thread.** HA shows it as "Matter Temperature
+  Sensor (32768)" with the live SCD41 reading. Both fabrics (the phone's and HA's
+  multi-admin share) commit cleanly.
 - Boots as an **OpenThread Sleepy End Device**, BLE-advertises for commissioning.
-  Test onboarding: pairing code `34970112332`, discriminator 3840, passcode 20202021.
+  Onboarding: pairing code **`3535-860-0323`**, discriminator 3840, passcode **528722**.
 - Reads the **real SCD41 temperature** (i2c0, P0.22/P0.24) and publishes it to the Matter
   `TemperatureMeasurement` cluster. Humidity + CO2 clusters are Stage 4 (not yet wired).
-- Footprint: FLASH ~685 KB, **RAM ~156 KB → ~100 KB free** (Debug). The sensor subsystem
-  cost only ~256 B of RAM. This is the Stage-3 RAM gate: it passes with room for the UI.
+- Footprint: FLASH ~685 KB, **RAM ~187 KB → ~70 KB free** (Debug, 40 KB CHIP heap).
 - Console on **uart0 = COM9** (P1.04/P1.06), not the board's USB CDC default.
+
+## Commissioning: the five things that must all be right
+
+Getting this to commission took five independent fixes that mask each other -- each one
+fails at a *different* stage, so fixing one just moves the failure. In order of the
+commissioning flow:
+
+1. **SPAKE2+ verifier must match the passcode** (fails at PASE: commissioner drops BLE
+   right after `PASE_Pake2`). `CONFIG_CHIP_DEVICE_SPAKE2_TEST_VERIFIER` is a **static
+   Kconfig default belonging to passcode 20202021** -- it is NOT recomputed when you set
+   `CONFIG_CHIP_DEVICE_SPAKE2_PASSCODE`. A custom passcode with the stock verifier makes
+   the device advertise one passcode while proving knowledge of another. Regenerate:
+   `python modules/lib/matter/scripts/tools/spake2p/spake2p.py gen-verifier -p <passcode> -s <salt> -i 1000`
+2. **The device needs a Certification Declaration** (fails at attestation:
+   `Failed AttestationRequest ... err = ac`, i.e. `GetCertificationDeclaration()` returned
+   nothing). The built-in example provider (`CHIP_FACTORY_DATA_NONE`) has a CD compiled in.
+   Generating factory data *without* `CHIP_FACTORY_DATA_GENERATE_CD` produces DAC+PAI but
+   **no CD** -- and enabling that option needs the `chip-cert` host tool, which NCS does
+   not ship prebuilt.
+3. **The DAC's PID must equal the device's PID** (fails at attestation: commissioner
+   accepts the response, then aborts ~1 s later with `ArmFailSafe(0s)`). The example
+   provider's DAC is **FFF1-8000**, so `CONFIG_CHIP_DEVICE_PRODUCT_ID` must be **32768
+   (0x8000)**. The sample ships 32781 (0x800D), which mismatches. (Its CD covers
+   0x8000..0x80xx, so only the DAC constrains the PID.)
+4. **The controller must trust the test DCL.** Home Assistant validates attestation against
+   the Distributed Compliance Ledger; with `enable_test_net_dcl = false` (the default) it
+   rejects test VIDs/CDs like ours (VID 0xFFF1). Set **`enable_test_net_dcl: true`** in the
+   Matter Server add-on config and restart it.
+5. **The CHIP heap must fit the ScanNetworks response** (fails *after* AddNOC: the fabric is
+   created, then `Adding response failed: b` (NO_MEMORY) on cluster `0x0031` cmd `0x0000`,
+   the fail-safe expires and the fabric is rolled back). HA issues a Thread `ScanNetworks`
+   during commissioning (phone frameworks do not -- which is why that path used to get
+   through). The 10 KB default is too small: **`CONFIG_CHIP_MALLOC_SYS_HEAP_SIZE=40960`**.
+
+Reading the device log is how you tell these apart -- each has a distinct signature, listed
+above. `Failed to advertise commissionable node: 3` and the `0x1349_FC00` attribute-read
+errors are benign noise; ignore them.
 
 ## What differs from the stock sample
 
