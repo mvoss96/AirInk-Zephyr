@@ -379,3 +379,100 @@ and how often it reads CO₂. Neither is a bug.
 > with the probe attached is that much too high — which is exactly how a 60 µA floor was mistaken
 > for 230 µA and blamed first on Matter and then on the panel. Unplug SWD for any absolute idle
 > number; the offset is only good enough for A/B iteration.
+
+---
+
+# The floor above was too good, because the button was broken (2026-07-13)
+
+`CONFIG_PM_DEVICE_RUNTIME` bought the console back for 7 µA. It also, silently, switched the button
+off: `gpio-keys` calls `pm_device_runtime_enable()` in its own init, which *suspends* the device on
+the spot, and its suspend action is `gpio_pin_interrupt_configure_dt(GPIO_INT_DISABLE)`. Nobody ever
+asked for it back. See the fix in `button::init()`.
+
+So every idle figure in the chapter above was measured on a device that could not be woken by its
+one button. Asking for the button back costs current, and now that is measured too:
+
+| firmware | idle floor (5 %) | mean while idle | charge / 5 min |
+|---|---|---|---|
+| the chapter above (button off, no VBUS watch) | 215.4 µA | 226.5 µA | 149.3 mAs |
+| button interrupt back on | 218.1 µA | 238.4 µA | 156.4 mAs |
+| button + VBUS wake (shipping) | 218.1 µA | 238.0 µA | 151.7 mAs |
+
+*(rig figures, J-Link attached: subtract ~155 µA for the absolute number.)*
+
+**The button costs ~12 µA** — a GPIOTE channel in event mode. That is not a regression to fix; it is
+the price of the device responding to a press at all, and it was always meant to be paid. The honest
+idle floor is **~72 µA**, not ~60, and the shipping average **~355 µA**: **~118 days** on a
+1000 mAh cell rather than 122.
+
+**The VBUS wake costs nothing** (−0.4 µA, i.e. noise). The charging bolt used to hang on the panel
+for up to 30 s after the cable was pulled -- charging is read from the raw voltages and was never
+stale, but the loop only looked once per cycle. It now waits on the SoC's own USBDETECTED/USBREMOVED
+alongside the button (`k_poll`, `battery::watch_supply`), so the panel reacts within one refresh.
+Polling for it would have cost current every cycle for an event that happens twice a week; the POWER
+peripheral's VBUS comparator is always on anyway and asks for nothing.
+
+> Measure a *settled* device. The first run of this comparison put a power-cycle inside the window
+> and the boot's extra CO₂ read and Thread re-attach showed up as +60 µA of "regression" that was
+> not there. The e-paper charge (58.4 → 58.9 mAs across all three runs) is the tell: same number of
+> refreshes, so any difference in the mean has to come from somewhere else.
+
+---
+
+# Where the energy actually goes, by event and not by threshold (2026-07-14)
+
+Twice now this document has blamed the e-paper panel, and twice it was wrong. The mistake both times
+was to bucket the samples *by current* and name the buckets: the ">12 mA" band looks like a display
+refresh until you notice it carries 58 mAs in 0.6 s, which is 97 mA average -- and the panel draws
+26 mA. It is the SCD41's photoacoustic pulse (peak 145 mA), which the earlier component measurements
+already said costs ~70 mAs.
+
+Bucket by *event* -- find the bursts, measure each one, match it against the known cadence -- and it
+is unambiguous (300 s, settled, probe-corrected, LIT):
+
+```
+CO2 read (1x / 5 min)   73.1 mAs   ~70 %   6.7 s, peak 145 mA
+idle floor (63 uA)      ~24 mAs    ~23 %   97 % of the time
+e-paper (3 refreshes)    9.1 mAs    ~9 %   1.6 s, peak 24 mA, ~3 mAs each
+Thread radio             1.1 mAs    ~1 %
+T+RH reads (10x)         1.5 mAs    ~1 %   90 ms, peak 15 mA
+                        --------
+                        ~105 mAs / 5 min -> 350 uA -> ~118 days @ 1000 mAh
+```
+
+**The CO₂ read is 70 % of the device.** Nothing else is worth optimising, and its 73 mAs is physics
+(single-shot is already the SCD41's lowest-duty mode). The only lever is how often it runs:
+every 10 min → ~187 days; every 15 min → ~231 days.
+
+Note the panel is *already* frugal: `ui::refresh()` only paints when a displayed value changed, so a
+still room refreshes once in five minutes and a moving one three times. That variance (±6 mAs) is
+larger than most of the things one might try to optimise -- which is why a single 5-minute window
+cannot resolve a 4 mAs change, and event attribution can.
+
+## The Thread radio: 5 s → 15 s → LIT, and it was never the problem
+
+The device polls its router to ask "anything for me?". Measured: 11 mA a poll.
+
+`CONFIG_CHIP_ICD_SLOW_POLL_INTERVAL` is 300 s and never took effect. A LIT-capable ICD must operate
+in **SIT** mode until some client registers itself through the ICD Management cluster, and in SIT the
+poll is capped by `CHIP_ICD_SIT_SLOW_POLL_LIMIT`. The sample ships 5 s; the spec ceiling (and NCS's
+own default) is 15 s. Raising it is free for a device that only ever reports -- the only cost is that
+an inbound command may wait up to 15 s.
+
+| | polls / 5 min | radio charge | interval |
+|---|---|---|---|
+| SIT, 5 s limit (as shipped by the sample) | 64 | 6.8 mAs | 5.0 s |
+| SIT, 15 s limit | 26 | 2.7 mAs | 15.0 s |
+| **LIT** (Home Assistant registered as an ICD client) | 9 | **1.1 mAs** | no idle poll at all |
+
+In LIT the remaining bursts are not polls: they are the readings being reported, which is the job.
+
+**And the average did not move** — 353.5 → 352.7 µA, 118 days either way. The radio was ~6 % of the
+budget at its worst and is ~1 % now. Both changes are right (less radio is less radio, and it is
+kinder to the Thread router), but together they buy about five days. Anyone reading this looking for
+battery life should stop here and go change the CO₂ interval.
+
+> Home Assistant offers the SIT/LIT switch because our ICD Management cluster advertises the LITS
+> feature bit. Commercial sensors (an IKEA Vallhorn, say) are SIT-only and offer no such control:
+> LIT additionally requires the Check-In protocol and a User Active Mode Trigger. We have all of it
+> because the NCS sample's defaults gave it to us, not because we chose it.
