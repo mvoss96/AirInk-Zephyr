@@ -177,6 +177,9 @@ void menu::enter()
 	cursor = ui::Menu::Calibrate;
 	idle_at = k_uptime_get() + MENU_IDLE_MS;
 	printk("[UI] menu opened\n");
+	// The Matter row is a way in while there is a code to scan, and a statement of fact after.
+	// Read once here, not per keystroke: the state cannot change while the menu is open.
+	ui::set_matter_status(app::commissioned());
 	ui::set_menu(cursor);
 }
 
@@ -200,18 +203,24 @@ menu::Status menu::proceed(button::Event e)
 	case State::Root:
 		if (e == button::Event::Short)
 		{
-			cursor = (ui::Menu)(((int)cursor + 1) % (int)ui::Menu::Count);
+			cursor = next_entry(cursor);
 			idle_at = now + MENU_IDLE_MS;
 			printk("[UI] menu cursor %d\n", (int)cursor);
 			ui::set_menu(cursor);
 		}
 		else if (e == button::Event::Long)
 		{
-			if (cursor != ui::Menu::Calibrate)
+			switch (cursor)
 			{
+			case ui::Menu::Calibrate:
+				to_calib_prompt();
+				break;
+			case ui::Menu::Pairing:
+				to_pairing();
+				break;
+			default:
 				return Status::Exited;
 			}
-			to_calib_prompt();
 		}
 		else if (now >= idle_at)
 		{
