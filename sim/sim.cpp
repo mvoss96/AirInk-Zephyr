@@ -12,6 +12,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 
 #include "ui/display_ui.hpp"
 #include "png_writer.h"
@@ -66,13 +67,33 @@ namespace
 
 } // namespace
 
-/** Render every screen once and write the PNG/BMP pairs.
+/** Render every screen of one build and write the PNG/BMP pairs.
+ *
+ * The two builds do not draw the same device: the Matter one names itself on the splash and has
+ * two extra menu rows with screens behind them. So the sim renders whichever it was asked for --
+ * and build.ps1 asks for both, because a screen that only one build has is exactly the screen a
+ * mockup is needed for.
+ *
+ * @param argc 2
+ * @param argv [1] = "standalone" or "matter"
  *
  * @retval 0 all screens rendered
- * @retval 1 ui::init() failed
+ * @retval 1 bad arguments, or ui::init() failed
  */
-int main()
+int main(int argc, char **argv)
 {
+	if (argc != 2)
+	{
+		std::printf("usage: airink_sim <standalone|matter>\n");
+		return 1;
+	}
+	const bool matter = std::strcmp(argv[1], "matter") == 0;
+	if (!matter && std::strcmp(argv[1], "standalone") != 0)
+	{
+		std::printf("unknown build '%s'\n", argv[1]);
+		return 1;
+	}
+
 	lv_init();
 	lv_tick_set_cb(tick_cb);
 
@@ -82,27 +103,33 @@ int main()
 	lv_display_set_buffers(disp, buf, nullptr, sizeof(buf), LV_DISPLAY_RENDER_MODE_FULL);
 	lv_display_set_flush_cb(disp, flush_cb);
 
-	/* The onboarding codes the Matter build hands to ui::init(): a real payload from the
-	 * device, so the QR in the mockup is the QR on the panel. Passing them is also what makes
-	 * the menu grow its Matter entry -- a build with no radio gets neither. */
-	const ui::Config cfg = {
-		.build = "Matter over Thread",
-		.pair_qr = "MT:M1TJ342C00KA0648G00",
-		.pair_manual = "3535-860-0323",
-		.factory_reset = true,
-	};
+	/* Exactly what each build hands ui::init() on the device. The Matter payload is a real one
+	 * from the board, so the QR in the mockup is the QR on the panel. The standalone build hands
+	 * over nothing -- and that absence is what takes the Matter and Factory reset rows out of its
+	 * menu, and the QR's draw buffer out of its LVGL pool. */
+	const ui::Config cfg = matter ? ui::Config{
+										.build = "Matter over Thread",
+										.pair_qr = "MT:M1TJ342C00KA0648G00",
+										.pair_manual = "3535-860-0323",
+										.factory_reset = true,
+									}
+								  : ui::Config{};
 	if (ui::init(cfg) != 0)
 	{
 		std::printf("ui::init failed\n");
 		return 1;
 	}
+	// The radio state the status bar would really show: Thread once paired, nothing at all in a
+	// build that has no radio to report on.
+	const ui::Link link = matter ? ui::Link::ThreadConnected : ui::Link::None;
+
 	// Every frame: stage the changes, then one refresh() commits (as on device).
 	ui::set_battery(87, /*charging=*/true); // boot: show the charging bolt
-	ui::set_link(ui::Link::BleConnected);
+	ui::set_link(link);
 	ui::refresh();
 	snapshot("boot");
 
-	// show_sensor() selects the view, set_sensor() fills it -- as main's measure() does.
+	// show_sensor() selects the view, set_sensor() fills it -- as the loop's measure() does.
 	g_tick_ms += 100;
 	ui::show_sensor();
 	ui::set_sensor(842, 2345, 4500); // 842 ppm, 23.4 C, 45 %
@@ -110,9 +137,8 @@ int main()
 	snapshot("sensor");
 
 	g_tick_ms += 100;
-	ui::set_link(ui::Link::ZigbeeConnected); // link token -> ZB
-	ui::set_battery(42, false);				 // bolt -> percentage
-	ui::set_sensor(1487, 2680, 6200);		 // wide values, view already selected
+	ui::set_battery(42, false);		  // bolt -> percentage
+	ui::set_sensor(1487, 2680, 6200); // wide values, view already selected
 	ui::refresh();
 	snapshot("sensor_high");
 
@@ -122,47 +148,56 @@ int main()
 	ui::refresh();
 	snapshot("lowbat");
 
-	g_tick_ms += 100;
-	ui::set_reset_prompt(); // the confirmation, reached by holding on the connected Matter screen
-	ui::refresh();
-	snapshot("reset_prompt");
-
-	// The calibration flow, one snapshot per step the user walks through.
+	// The menu, one snapshot per row the cursor can stop on -- which is where the two builds
+	// visibly differ: no radio, no Matter row, and nothing to reset.
 	g_tick_ms += 100;
 	ui::set_battery(87, false);
 	ui::set_menu(ui::Menu::Calibrate);
 	ui::refresh();
 	snapshot("menu");
 
-	g_tick_ms += 100;
-	ui::set_menu(ui::Menu::Matter); // one tap moves the cursor
-	ui::refresh();
-	snapshot("menu_matter");
+	if (matter)
+	{
+		g_tick_ms += 100;
+		ui::set_menu(ui::Menu::Matter); // one tap moves the cursor
+		ui::refresh();
+		snapshot("menu_matter");
 
-	g_tick_ms += 100;
-	ui::set_menu(ui::Menu::FactoryReset);
-	ui::refresh();
-	snapshot("menu_factory_reset");
+		g_tick_ms += 100;
+		ui::set_menu(ui::Menu::FactoryReset);
+		ui::refresh();
+		snapshot("menu_factory_reset");
+	}
 
 	g_tick_ms += 100;
 	ui::set_menu(ui::Menu::Exit);
 	ui::refresh();
 	snapshot("menu_exit");
 
-	// The Matter screen, both halves. Uncommissioned: something to scan, radio advertising over
-	// BLE. Commissioned: nothing to scan, so the state instead -- and the way back out.
-	g_tick_ms += 100;
-	ui::set_link(ui::Link::BleAdv);
-	ui::show_matter(/*commissioned=*/false);
-	ui::refresh();
-	snapshot("matter_pairing");
+	if (matter)
+	{
+		// The Matter screen, both halves. Uncommissioned: something to scan, and the radio is
+		// advertising over BLE. Commissioned: nothing to scan, so the state instead.
+		g_tick_ms += 100;
+		ui::set_link(ui::Link::BleAdv);
+		ui::show_matter(/*commissioned=*/false);
+		ui::refresh();
+		snapshot("matter_pairing");
 
-	g_tick_ms += 100;
-	ui::set_link(ui::Link::ThreadConnected);
-	ui::show_matter(/*commissioned=*/true);
-	ui::refresh();
-	snapshot("matter_connected");
+		g_tick_ms += 100;
+		ui::set_link(link);
+		ui::show_matter(/*commissioned=*/true);
+		ui::refresh();
+		snapshot("matter_connected");
 
+		// Reached by holding on the Factory reset row. Tap cancels; hold drops every fabric.
+		g_tick_ms += 100;
+		ui::set_reset_prompt();
+		ui::refresh();
+		snapshot("reset_prompt");
+	}
+
+	// The calibration flow, one snapshot per step the user walks through.
 	g_tick_ms += 100;
 	ui::set_calib_prompt();
 	ui::refresh();

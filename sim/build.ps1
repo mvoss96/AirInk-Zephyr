@@ -106,10 +106,19 @@ $linkObjs += $cppObj
 & $Gcc -O1 @linkObjs -lstdc++ -lm -o $exe
 if ($LASTEXITCODE -ne 0) { throw "link failed" }
 
-Write-Host "==> Rendering screens" -ForegroundColor Cyan
-Push-Location $out
-try { & $exe } finally { Pop-Location }
-if ($LASTEXITCODE -ne 0) { throw "sim run failed" }
+# Once per application (see apps/). The two do not draw the same device -- the Matter build names
+# itself on the splash and has two extra menu rows with screens behind them -- and a screen only one
+# build has is exactly the screen a mockup is needed for.
+foreach ($variant in @("standalone", "matter")) {
+    $dir = Join-Path $out $variant
+    New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    Write-Host "==> Rendering screens: $variant" -ForegroundColor Cyan
+    Push-Location $dir
+    try { & $exe $variant } finally { Pop-Location }
+    if ($LASTEXITCODE -ne 0) { throw "sim run failed for $variant" }
+}
 
 Write-Host "==> Done. Images in $out" -ForegroundColor Green
-Get-ChildItem $out -Include *.png, *.bmp -Recurse | Select-Object Name, Length
+Get-ChildItem $out -Include *.png -Recurse | ForEach-Object {
+    "{0,-12} {1}" -f $_.Directory.Name, $_.Name
+}

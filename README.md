@@ -19,7 +19,10 @@ dts/            The hardware (airink_hw.dtsi). Both applications include it.
 conf/           The board's drivers (airink_hw.conf). Both applications merge it.
 cmake/          The shared source lists.
 sim/            A host program (not a Zephyr app): renders the UI views to PNG with plain gcc, so
-                layout can be checked without flashing.
+                layout can be checked without flashing. `pwsh -File sim/build.ps1` writes both
+                applications' screens to sim/out/standalone/ and sim/out/matter/ -- they do not
+                draw the same device, and a screen only one of them has is exactly the screen a
+                mockup is needed for.
 tools/          flash.ps1 (SWD via J-Link), and the ZAP regeneration script under apps/matter.
 docs/           Power analysis.
 ```
