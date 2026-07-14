@@ -68,9 +68,21 @@ ConcentrationMeasurement::Instance<true, false, false, false, false, false>
 	     ConcentrationMeasurement::MeasurementMediumEnum::kAir,
 	     ConcentrationMeasurement::MeasurementUnitEnum::kPpm);
 
-/* SCD41 datasheet operating range. */
-constexpr float kCo2MinPpm = 400.0f;
-constexpr float kCo2MaxPpm = 5000.0f;
+/* What the SCD41 can OUTPUT -- not the band in which it is accurate.
+ *
+ * The accuracy figure in the datasheet is quoted for 400..5000 ppm, and those numbers were sitting
+ * here as the cluster's Min/MaxMeasuredValue. That is not what those attributes are for, and the SDK
+ * enforces them: SetMeasuredValue() calls CheckConstraintMinMax() and, for anything outside them,
+ * returns CHIP_ERROR_INVALID_ARGUMENT and stores NOTHING (concentration-measurement-server.h:366).
+ *
+ * So a bedroom that passes 5000 ppm overnight -- which is exactly the reading a person bought a CO2
+ * monitor to see -- froze the attribute at the last value under the bar. The panel showed the truth,
+ * the Air Quality cluster (which has no such constraint) said ExtremelyPoor, and the number in Home
+ * Assistant sat still. Nothing logged it, because nobody read the return.
+ *
+ * The sensor's actual output range is 0..40000 ppm. That is what the cluster may hold. */
+constexpr float kCo2MinPpm = 0.0f;
+constexpr float kCo2MaxPpm = 40000.0f;
 
 /* AirInk's own thread. It renders a 400x300 mono frame with 48 px fonts and blocks ~5 s in a
  * CO2 single-shot, so it gets the big stack -- and it gets it here rather than on the CHIP event
@@ -109,7 +121,13 @@ void PublishReading(const Scd41Reading &r)
 	TemperatureMeasurement::Attributes::MeasuredValue::Set(kSensorEndpointId,
 							       static_cast<int16_t>(r.temp_x100));
 	RelativeHumidityMeasurement::Attributes::MeasuredValue::Set(kSensorEndpointId, r.hum_x100);
-	sCo2.SetMeasuredValue(DataModel::Nullable<float>(static_cast<float>(r.co2_ppm)));
+	/* Checked, because it can refuse: a value outside Min/MaxMeasuredValue is dropped in silence, and
+	 * a CO2 number that quietly stops moving is worse than one that is missing. */
+	const CHIP_ERROR co2Err =
+		sCo2.SetMeasuredValue(DataModel::Nullable<float>(static_cast<float>(r.co2_ppm)));
+	if (co2Err != CHIP_NO_ERROR) {
+		LOG_ERR("CO2 %u ppm was not published (%s)", r.co2_ppm, co2Err.AsString());
+	}
 	sAirQuality.UpdateAirQuality(AirQualityFromCo2(r.co2_ppm));
 	PlatformMgr().UnlockChipStack();
 }

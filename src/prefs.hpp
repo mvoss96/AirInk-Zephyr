@@ -8,8 +8,8 @@
  * The settings the user owns, kept across a reboot.
  *
  * This is the device's only persistent store. Until it existed, nothing the user chose survived a
- * power cycle -- which is why the temperature unit could not be offered at all (see the note above
- * ui::List). The sensor's own trim could not either: the SCD41 does have an EEPROM, but it is good
+ * power cycle -- which is why the temperature unit could not be offered at all. The sensor's own trim
+ * could not either: the SCD41 does have an EEPROM, but it is good
  * for a few thousand writes, and these are settings a user sits and turns until the panel agrees with
  * the thermometer in their hand. So they live here, in NVS, and are written into the sensor's RAM on
  * every boot -- see scd41::set_trim().

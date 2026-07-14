@@ -56,26 +56,25 @@ namespace ui
 
 	/** What this build of the device can actually do.
 	 *
-	 * The UI shows what is there and offers nothing that is not: a menu row exists because there
-	 * is something behind it, not because of a compile switch. So the caller says what it brought,
-	 * and everything else follows from that.
+	 * What the display needs to know, and nothing more. Which menu rows exist is NOT here any more:
+	 * the display draws whatever list of strings it is handed, and menu.cpp decides what is in it by
+	 * asking the app what the device can do. (There used to be a `factory_reset` flag here for
+	 * exactly that, and after the menu became a table nothing read it -- it was set in two places and
+	 * consulted in none.)
 	 */
 	struct Config
 	{
 		/** Named on the boot splash, so a glance at the panel says which image is on the board. */
 		const char *build = "Standalone";
 
-		/** Matter onboarding payload ("MT:..."), rendered as a QR. NULL in a build with no radio
-		 * -- then there is no Matter row, no view behind it, and no QR draw buffer (the single
-		 * largest allocation in the LVGL pool). */
+		/** Matter onboarding payload ("MT:..."), rendered as a QR. NULL in a build with no radio --
+		 * then there is no view behind the Matter row, no QR draw buffer (the single largest
+		 * allocation in the LVGL pool), no signal bars and no Matter mark. */
 		const char *pair_qr = nullptr;
 
 		/** The same code for humans ("1234-567-8901"), drawn under the QR for when a camera will
 		 * not cooperate. Ignored if pair_qr is NULL. */
 		const char *pair_manual = nullptr;
-
-		/** Whether anything can actually be reset. If not, the menu does not offer it. */
-		bool factory_reset = false;
 	};
 
 	/** Build all widgets and show the boot splash (one full refresh).

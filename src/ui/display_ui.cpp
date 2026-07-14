@@ -452,8 +452,6 @@ namespace
 		plat::display_suspend(); // deep-sleep the panel until the next refresh
 	}
 
-	/** Hide every content view; the status bar stays visible. */
-
 	/** Is this a view the user steps through with the button?
 	 *
 	 * A full refresh is a ~2 s black flash. Paying it on every step makes the device feel broken, so
@@ -1110,14 +1108,7 @@ void ui::set_sensor(uint16_t co2_ppm, int32_t temp_x100, uint16_t hum_x100)
 	lv_label_set_text(co2_value, buf);
 	snprintf(buf, sizeof(buf), "%u", (unsigned)(hum_q / 100));
 	lv_label_set_text(hum_value, buf);
-	if (fahrenheit)
-	{
-		snprintf(buf, sizeof(buf), "%d", (int)(temp_q / 100));
-	}
-	else
-	{
-		snprintf(buf, sizeof(buf), "%d.%d", (int)(temp_q / 100), (int)(abs(temp_q % 100) / 10));
-	}
+	format_x100(buf, sizeof(buf), temp_q, fahrenheit ? 0 : 1);
 	lv_label_set_text(temp_value, buf);
 
 	last_co2_ppm = co2_ppm;
@@ -1151,15 +1142,7 @@ void ui::set_temp_unit(TempUnit u)
 		last_temp_x100 = fahrenheit ? quantize_temp_f_x100(last_temp_c_x100)
 									: quantize_temp_x100(last_temp_c_x100);
 		char buf[24];
-		if (fahrenheit)
-		{
-			snprintf(buf, sizeof(buf), "%d", (int)(last_temp_x100 / 100));
-		}
-		else
-		{
-			snprintf(buf, sizeof(buf), "%d.%d", (int)(last_temp_x100 / 100),
-					 (int)(abs(last_temp_x100 % 100) / 10));
-		}
+		format_x100(buf, sizeof(buf), last_temp_x100, fahrenheit ? 0 : 1);
 		lv_label_set_text(temp_value, buf);
 	}
 
@@ -1178,12 +1161,28 @@ void ui::set_error(const char *title, const char *detail)
 		return;
 	}
 	pending_view = VIEW_ERROR;
-	if (title)
+
+	/* Deduped like every other setter here, and it was the only one that was not.
+	 *
+	 * A sensor that has stopped answering fails on every tick, and the loop stages the same two lines
+	 * every time. Unconditionally dirtying the panel meant a ~2 mAs refresh every 30 s for as long as
+	 * the fault lasted -- about +67 uA, which more than DOUBLES the 63 uA idle floor, in the one state
+	 * where nobody is looking at the device and the battery has to last until somebody does.
+	 *
+	 * lv_label already holds what is on the glass, so it is also the record of it. */
+	const char *t = title ? title : lv_label_get_text(err_title_lbl);
+	const char *d = detail ? detail : "";
+
+	if (strcmp(lv_label_get_text(err_title_lbl), t) != 0)
 	{
-		lv_label_set_text(err_title_lbl, title);
+		lv_label_set_text(err_title_lbl, t);
+		dirty = true;
 	}
-	lv_label_set_text(err_detail_lbl, detail ? detail : "");
-	dirty = true;
+	if (strcmp(lv_label_get_text(err_detail_lbl), d) != 0)
+	{
+		lv_label_set_text(err_detail_lbl, d);
+		dirty = true;
+	}
 }
 
 void ui::set_low_battery()
@@ -1284,6 +1283,8 @@ void ui::set_link(Link state)
 	// claim there is -- they mean "attached, no signal", a real and much worse state than "not asked
 	// yet". Until then the status bar simply says nothing, which is the truth.
 	const bool bars = (state == Link::ThreadConnected) && (last_bars >= 0);
+	const bool was_showing = !lv_obj_has_flag(link_icon, LV_OBJ_FLAG_HIDDEN);
+
 	for (int i = 0; i < SIGNAL_BARS; i++)
 	{
 		set_hidden(signal_bar[i], !bars);
@@ -1291,7 +1292,15 @@ void ui::set_link(Link state)
 	set_hidden(link_icon, !bars);
 
 	last_link = (int)state;
-	dirty = true;
+
+	// Only what is DRAWN counts. The radio has five states and the status bar draws one of them, so
+	// None -> BleAdv at boot, BleAdv -> None an hour later when the advertising window closes, and
+	// every step of a Thread join, all leave the corner exactly as blank as they found it. Dirtying
+	// the panel for those bought a partial refresh apiece for a picture nobody could tell apart.
+	if (bars != was_showing)
+	{
+		dirty = true;
+	}
 }
 
 void ui::set_signal(int rssi_dbm)

@@ -18,6 +18,25 @@ namespace
 	const struct i2c_dt_spec scd41_bus = I2C_DT_SPEC_GET(DT_NODELABEL(scd41));
 	Ema<1> temp_ema; // Lightest filter: a real step is ~90 % shown after ~3 ticks.
 
+	/** The SCD4x's CRC-8 over one 16-bit word: polynomial 0x31, init 0xFF, no final XOR.
+	 *
+	 * @param w the two data bytes, most significant first
+	 * @return the checksum the sensor sends after them
+	 */
+	uint8_t crc8(const uint8_t *w)
+	{
+		uint8_t crc = 0xFF;
+		for (int i = 0; i < 2; i++)
+		{
+			crc ^= w[i];
+			for (int b = 0; b < 8; b++)
+			{
+				crc = (crc & 0x80) ? (uint8_t)((crc << 1) ^ 0x31) : (uint8_t)(crc << 1);
+			}
+		}
+		return crc;
+	}
+
 	/** Wake the SCD41 (command 0x36F6) and wait out its wake-up time.
 	 * In single-shot mode the driver leaves the sensor powered down after init, and
 	 * attr_set/attr_get do not wake it. The command is NACKed while asleep, so send
@@ -119,6 +138,13 @@ int scd41::set_trim(const Trim &t)
 	err |= put(SENSOR_ATTR_SCD4X_AUTOMATIC_CALIB_ENABLE, t.auto_calib ? 1 : 0, 0,
 			   "self-calibration");
 
+	// Back to sleep, and this matters more than it looks. Every other command path here powers the
+	// sensor down when it is finished; this one is called from the menu, on every toggle and every
+	// saved number -- and while the menu is open the loop takes no readings, so nothing else would
+	// come along and do it. An idle SCD41 left awake for the thirty seconds until the menu times out
+	// is the kind of leak that never shows up in a log and does show up in the battery.
+	power_down();
+
 	// Deliberately NOT persisted. scd4x_persist_settings() writes the sensor's EEPROM, which has a
 	// life measured in thousands of writes -- and these are settings a user is meant to sit and turn
 	// until the panel agrees with their thermometer. They live in our own NVS instead (prefs) and are
@@ -158,6 +184,7 @@ int scd41::sample_rht(Scd41Reading *out)
 	const uint8_t meas[2] = {0x21, 0x96};
 	if (i2c_write_dt(&scd41_bus, meas, sizeof(meas)) < 0)
 	{
+		power_down(); // every way out of here puts the sensor back to sleep -- see below
 		return -EIO;
 	}
 	k_msleep(60); // rht-only measurement time (< 50 ms per datasheet)
@@ -167,6 +194,18 @@ int scd41::sample_rht(Scd41Reading *out)
 	if (i2c_write_dt(&scd41_bus, rd_cmd, sizeof(rd_cmd)) < 0 ||
 		i2c_read_dt(&scd41_bus, rd, sizeof(rd)) < 0)
 	{
+		power_down();
+		return -EIO;
+	}
+
+	/* The CRCs, which this path used to skip. It runs on nine of every ten cycles -- the driver's
+	 * full-CO2 path checks them, this hand-rolled one did not -- and a corrupted word does not look
+	 * like an error: it looks like a temperature. It would then go into the EMA and linger for
+	 * several ticks. The bytes are already in the buffer; all they needed was reading. */
+	if (crc8(&rd[3]) != rd[5] || crc8(&rd[6]) != rd[8])
+	{
+		printk("SCD41: bad CRC on the T/RH read\n");
+		power_down();
 		return -EIO;
 	}
 
@@ -186,7 +225,12 @@ int scd41::calibrate_begin()
 	wake();
 
 	const uint8_t start[2] = {0x21, 0xB1}; // start_periodic_measurement
-	return (i2c_write_dt(&scd41_bus, start, sizeof(start)) < 0) ? -EIO : 0;
+	if (i2c_write_dt(&scd41_bus, start, sizeof(start)) < 0)
+	{
+		power_down(); // woken and then refused: do not leave it idling for the next half minute
+		return -EIO;
+	}
+	return 0;
 }
 
 int scd41::calibrate_finish(uint16_t target_ppm, int16_t *correction_ppm)

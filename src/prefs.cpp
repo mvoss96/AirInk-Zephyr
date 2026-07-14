@@ -4,6 +4,7 @@
 #include <zephyr/settings/settings.h>
 
 #include <errno.h>
+#include <stdio.h>
 #include <string.h>
 
 namespace
@@ -24,13 +25,26 @@ namespace
 		size_t bytes;  // 4 for an int, 1 for a bool or an enum
 	};
 
+	/* Named, because the setters below index this table -- and `save(FIELDS[1])` would keep compiling,
+	 * and start writing the altitude into the offset's key, the day someone reorders it. */
+	enum FieldId : uint8_t
+	{
+		F_UNIT,
+		F_OFFSET,
+		F_ALTITUDE,
+		F_AUTO_CALIB,
+		F_COUNT,
+	};
+
 	/* NB: the addresses are of the module state above, so the table is const and the values are not. */
 	const Field FIELDS[] = {
-		{"temp_unit", &unit, 1},
-		{"temp_offset", &sensor_trim.temp_offset_x10, sizeof(sensor_trim.temp_offset_x10)},
-		{"altitude", &sensor_trim.altitude_m, sizeof(sensor_trim.altitude_m)},
-		{"auto_calib", &sensor_trim.auto_calib, 1},
+		/* F_UNIT       */ {"temp_unit", &unit, 1},
+		/* F_OFFSET     */ {"temp_offset", &sensor_trim.temp_offset_x10,
+							sizeof(sensor_trim.temp_offset_x10)},
+		/* F_ALTITUDE   */ {"altitude", &sensor_trim.altitude_m, sizeof(sensor_trim.altitude_m)},
+		/* F_AUTO_CALIB */ {"auto_calib", &sensor_trim.auto_calib, 1},
 	};
+	static_assert(sizeof(FIELDS) / sizeof(FIELDS[0]) == (size_t)F_COUNT, "a field with no entry");
 
 	const Field *field_for(const char *name)
 	{
@@ -150,23 +164,23 @@ int prefs::set_temp_unit(ui::TempUnit u)
 	// The user's choice takes effect now, whatever the flash says. Refusing to switch the display
 	// because the write failed would punish them twice for a fault that is not theirs.
 	unit = u;
-	return save(FIELDS[0]);
+	return save(FIELDS[F_UNIT]);
 }
 
 int prefs::set_temp_offset_x10(int tenths_c)
 {
 	sensor_trim.temp_offset_x10 = clamp(tenths_c, 0, 200);
-	return save(FIELDS[1]);
+	return save(FIELDS[F_OFFSET]);
 }
 
 int prefs::set_altitude_m(int metres)
 {
 	sensor_trim.altitude_m = clamp(metres, 0, 3000);
-	return save(FIELDS[2]);
+	return save(FIELDS[F_ALTITUDE]);
 }
 
 int prefs::set_auto_calib(bool on)
 {
 	sensor_trim.auto_calib = on;
-	return save(FIELDS[3]);
+	return save(FIELDS[F_AUTO_CALIB]);
 }

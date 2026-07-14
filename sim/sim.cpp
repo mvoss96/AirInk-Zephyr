@@ -103,15 +103,15 @@ int main(int argc, char **argv)
 	lv_display_set_buffers(disp, buf, nullptr, sizeof(buf), LV_DISPLAY_RENDER_MODE_FULL);
 	lv_display_set_flush_cb(disp, flush_cb);
 
-	/* Exactly what each build hands ui::init() on the device. The Matter payload is a real one
-	 * from the board, so the QR in the mockup is the QR on the panel. The standalone build hands
-	 * over nothing -- and that absence is what takes the Matter and Factory reset rows out of its
-	 * menu, and the QR's draw buffer out of its LVGL pool. */
+	/* Exactly what each build hands ui::init() on the device. The Matter payload is a real one from
+	 * the board, so the QR in the mockup is the QR on the panel. The standalone build hands over
+	 * nothing -- and that absence is what takes the QR's draw buffer out of its LVGL pool, the signal
+	 * bars and the Matter mark off its status bar, and the badge off its splash. (Which rows its menu
+	 * has is menu.cpp's business, not the display's, so the sim spells them out below.) */
 	const ui::Config cfg = matter ? ui::Config{
 										.build = "Matter over Thread",
 										.pair_qr = "MT:M1TJ342C00KA0648G00",
 										.pair_manual = "3535-860-0323",
-										.factory_reset = true,
 									}
 								  : ui::Config{};
 	if (ui::init(cfg) != 0)

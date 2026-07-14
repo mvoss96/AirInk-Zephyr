@@ -1,5 +1,6 @@
 #pragma once
 #include <stdint.h>
+#include <stdio.h>
 
 /*
  * Rounding of sensor readings to the resolution the panel actually shows.
@@ -71,6 +72,37 @@ namespace ui
 			}
 		}
 		return 0;
+	}
+
+	/** Write a hundredths value out as a person reads it: "-0.4", "23.5", "77".
+	 *
+	 * The sign is handled once, here, and that is the whole point of the function. The obvious idiom
+	 *
+	 *     snprintf(buf, "%d.%d", v / 100, abs(v % 100) / 10);
+	 *
+	 * loses the minus for everything between -1.00 and 0.00 -- integer division truncates toward zero,
+	 * so -50 / 100 is 0, and the panel prints "0.5" for half a degree of frost. It was in three places
+	 * before this existed, and a device whose calibration flow asks the user to stand outside in the
+	 * winter is not the device to get that wrong.
+	 *
+	 * @param buf      where to write
+	 * @param n        its size
+	 * @param v_x100   the value in hundredths of whatever it is
+	 * @param decimals 1 -> "23.5"; 0 -> "77" (rounded on the way in, not here)
+	 */
+	inline void format_x100(char *buf, size_t n, int32_t v_x100, int decimals)
+	{
+		const char *sign = (v_x100 < 0) ? "-" : "";
+		const int32_t a = (v_x100 < 0) ? -v_x100 : v_x100;
+
+		if (decimals == 1)
+		{
+			snprintf(buf, n, "%s%d.%d", sign, (int)(a / 100), (int)((a % 100) / 10));
+		}
+		else
+		{
+			snprintf(buf, n, "%s%d", sign, (int)(a / 100));
+		}
 	}
 
 	/** Round a humidity to the whole percent the panel shows.

@@ -4,37 +4,44 @@
 #include "input/button.hpp"
 
 /** @file
- * The settings menu and the calibration flow.
+ * The settings menu.
  *
- * This module exists only while the user is inside it. It has no "sensor" state, knows
- * nothing about readings, the battery or the measurement cadence, and never refreshes
- * the panel -- it only stages its own views. main.cpp owns the mode, the readings, and
- * every other view.
- *
- * A failed calibration is the menu's own business: it puts the message up and waits for
- * the user to acknowledge it, so the loop never learns that one happened.
+ * This module exists only while the user is inside it. It has no "sensor" state, knows nothing about
+ * readings, the battery or the measurement cadence, and never refreshes the panel -- it only stages
+ * its own views. The loop (app.cpp) owns the mode, the readings, and every other view.
  *
  *   enter()                      the user held the button on the sensor view
  *   proceed(gesture)  -> Running the user is still in here
  *                     -> Exited  put the readings back on screen
  *
- * Every screen below Root goes back TO Root, never straight out: the user came from the menu and
- * may well want the next entry. Only Exit and Root's own idle timeout leave the menu -- and a
- * finished recalibration, which is a completion rather than a way back.
+ * WHAT the menu contains is not here and not in the display either: it is a table at the top of
+ * menu.cpp, and that table is the whole definition. A row says what KIND it is -- a sub-menu, a
+ * screen, a toggle, a number, a way out -- and the machinery knows how each kind behaves. Adding a
+ * setting is adding a row.
  *
- * Root --hold(Calibrate)-----> CalibPrompt --hold--> CalibRun --3 min--> Recalibrated
- *  |  tap = next entry              | tap / 2 min idle    | hold = abort      (leaves the menu)
- *  |                                v                     v                sensor said no
- *  |                              Root                  Root                     v
- *  |                                                                       CalibFailed
- *  |                                                                     any gesture / idle
- *  |                                                                             v
- *  |                                                                           Root
- *  |-hold(Matter)-------------> Matter ------any gesture / 2 min idle---------> Root
- *  |-hold(Factory reset)------> ResetPrompt --tap / 30 s idle-----------------> Root
- *  |                                | hold = FactoryReset (the loop's hook reboots us)
- *  |
- *  |-hold(Exit) / 30 s idle ---> Exited
+ * So this is the shape of it, which is the part that does not change when a row is added:
+ *
+ *   a list  --tap--------------> the next row that this build has
+ *           --hold on Submenu--> that list          (Leave goes back to the parent)
+ *           --hold on Toggle---> it flips, the row rewrites itself, nothing else moves
+ *           --hold on Number---> the editor: tap steps and wraps, hold saves, idle discards
+ *           --hold on Screen---> a flow of its own, below
+ *           --hold on Leave----> the parent list, or out of the menu if this is the root
+ *           --30 s idle--------> out of the menu
+ *
+ *   Screens, each of which ends up back in the list it was opened from:
+ *
+ *     CalibCo2  --hold--> CalibRun --3 min--> Recalibrated (leaves the menu: it is a completion)
+ *        | tap / idle         | hold = abort        | the sensor said no
+ *        v                    v                     v
+ *      list                 list                  CalibFailed --any gesture / idle--> list
+ *
+ *     Matter       --any gesture / 2 min idle--> list
+ *     FactoryReset --tap / 30 s idle-----------> list
+ *          | hold = FactoryReset (the loop's hook reboots us)
+ *
+ * A failed calibration is the menu's own business: it puts the message up and waits for the user to
+ * acknowledge it, so the loop never learns that one happened.
  */
 namespace menu
 {

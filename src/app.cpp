@@ -80,6 +80,11 @@ int32_t app::last_temp_x100()
 	return last_temp;
 }
 
+void app::forget_last_temp()
+{
+	last_temp = INT32_MIN;
+}
+
 void app::publish_unit(ui::TempUnit u)
 {
 	if (hooks.publish_unit)
@@ -123,10 +128,12 @@ static void measure()
 		r.co2_ppm = last_co2_ppm;
 	}
 
-	printk("%s CO2 %u ppm  T %d.%02d C  RH %d.%02d %%\n",
-		   full_co2 ? "[CO2]" : "[RHT]", r.co2_ppm,
-		   r.temp_x100 / 100, abs(r.temp_x100 % 100),
-		   r.hum_x100 / 100, r.hum_x100 % 100);
+	// %d.%02d with abs() on the fraction drops the sign for -1.00 < T < 0.00 -- integer division
+	// truncates toward zero, so -0.5 C prints as "0.5". The sign goes in front of the whole thing.
+	const int32_t t_abs = (r.temp_x100 < 0) ? -r.temp_x100 : r.temp_x100;
+	printk("%s CO2 %u ppm  T %s%d.%02d C  RH %d.%02d %%\n", full_co2 ? "[CO2]" : "[RHT]", r.co2_ppm,
+		   (r.temp_x100 < 0) ? "-" : "", t_abs / 100, t_abs % 100, r.hum_x100 / 100,
+		   r.hum_x100 % 100);
 
 	last_temp = r.temp_x100; // the offset editor predicts against this
 
@@ -414,13 +421,13 @@ static void app_loop()
 
 void app::run()
 {
-	// What the UI shows and offers is decided here, by what the caller actually gave us: a Matter
-	// row where there are codes to show, a Factory reset row where there is something to reset.
+	// What the panel needs. What the MENU offers is decided elsewhere -- it asks has_radio() and
+	// can_factory_reset() -- because a row exists when there is something behind it, and only the app
+	// knows what it was handed.
 	const ui::Config ui_cfg = {
 		.build = build_name,
 		.pair_qr = pair_qr,
 		.pair_manual = pair_manual,
-		.factory_reset = hooks.factory_reset != nullptr,
 	};
 	// Before the panel, because ui::init() builds the sensor view and the menu with a unit already in
 	// them. A store that will not come up is survivable: prefs answers Celsius and says so in the log.

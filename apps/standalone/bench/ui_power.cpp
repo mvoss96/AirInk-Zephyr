@@ -19,11 +19,23 @@
 #include "sensors/scd41.hpp"
 #include "ui/display_ui.hpp"
 
-// ---- pick the test (change per build) ----
+/* ---- pick the test ----
+ *
+ *   west build ... -- -DAPP_ENTRY=ui_power -DEXTRA_CXXFLAGS=-DTEST_MODE=2
+ *
+ * Overridable, and it has to be. It used to be a bare #define here, which meant the two modes it was
+ * not set to were never compiled -- and they duly rotted: both called ui::set_menu(), an API that had
+ * been deleted, and the file went on building for months because the preprocessor threw those
+ * branches away before the compiler could object. A harness whose modes cannot all be built is a
+ * harness that is only as correct as the last mode anyone used.
+ */
 #define MODE_MENU_IDLE 1 // menu on screen, nothing happening: is anything left awake?
 #define MODE_MENU_NAV  2 // a cursor move every 3 s: what one partial refresh costs
 #define MODE_CALIB     3 // the real 3 min of periodic measurement, minus the FRC
-#define TEST_MODE      MODE_CALIB
+
+#ifndef TEST_MODE
+#define TEST_MODE MODE_CALIB
+#endif
 
 static const struct device *const console_dev = DEVICE_DT_GET(DT_CHOSEN(zephyr_console));
 
@@ -43,8 +55,17 @@ int main(void)
 	ui::set_battery(50, false);
 	ui::refresh();
 
+	/* The menu's rows belong to menu.cpp, and a bench harness deliberately does not compile it (it
+	 * would register an input callback behind the harness's back). So the labels are spelled out
+	 * here: what is being measured is the panel drawing five rows and a cursor, and any five rows
+	 * cost the same. */
+	static const char *const ROWS[] = {"Calibrate", "Units: Â°"
+													"C",
+									   "Matter", "Factory reset", "Exit"};
+	constexpr int ROW_COUNT = (int)(sizeof(ROWS) / sizeof(ROWS[0]));
+
 #if TEST_MODE == MODE_MENU_IDLE
-	ui::set_menu(ui::Menu::Calibrate);
+	ui::show_list(ROWS, ROW_COUNT, 0);
 	ui::refresh();
 	printk("menu shown, suspending console, sleeping\n");
 	k_msleep(200);
@@ -61,7 +82,7 @@ int main(void)
 	while (1)
 	{
 		pm_device_action_run(console_dev, PM_DEVICE_ACTION_RESUME);
-		ui::set_menu((ui::Menu)(i++ % (int)ui::Menu::Count));
+		ui::show_list(ROWS, ROW_COUNT, i++ % ROW_COUNT);
 		ui::refresh();
 		pm_device_action_run(console_dev, PM_DEVICE_ACTION_SUSPEND);
 		k_msleep(3000);

@@ -139,6 +139,12 @@ namespace
 	{
 		prefs::set_temp_offset_x10(v);
 		push_trim();
+
+		// The last reading was taken under the OLD offset, and no measurement can happen while the
+		// menu is up. Keeping it would make the editor predict against a number that is already wrong
+		// -- re-open it after a save and it would quote the reading from before the change. Better to
+		// say "no reading yet" for the half minute until there is one again.
+		app::forget_last_temp();
 	}
 
 	int altitude_get() { return prefs::trim().altitude_m; }
@@ -233,6 +239,15 @@ namespace
 		{Kind::Toggle, "Auto-calib", (uint8_t)Toggle::AutoCalib},
 		{Kind::Leave, "Back"},
 	};
+
+	/* Both lists are already AT the panel's limit, and draw() below fills fixed arrays of that size.
+	 * A sixth row -- which the header of this file cheerfully invites -- would write past the end of
+	 * them, and then show_list() would refuse the list and draw nothing, so the corruption would be
+	 * the only symptom. The panel's limit is a hard limit; say so here, where the row would be added.
+	 * (A list that genuinely needs six entries needs a sub-menu, which now costs one row.) */
+	static_assert(sizeof(ROOT) / sizeof(ROOT[0]) <= ui::LIST_MAX_ROWS, "the root menu is too long");
+	static_assert(sizeof(CALIBRATE) / sizeof(CALIBRATE[0]) <= ui::LIST_MAX_ROWS,
+				  "the Calibrate menu is too long");
 
 	struct ListDef
 	{
@@ -341,15 +356,11 @@ namespace
 			{
 				const NumberDef &d = NUMBERS[r.id];
 				const int v = d.get();
-				if (d.decimals == 1)
-				{
-					snprintf(text[n], sizeof(text[n]), "%s: %d.%d %s", r.label, v / 10, abs(v % 10),
-							 d.unit);
-				}
-				else
-				{
-					snprintf(text[n], sizeof(text[n]), "%s: %d %s", r.label, v, d.unit);
-				}
+				// The stored value is in tenths when decimals==1, so scale to the hundredths format_x100
+				// speaks. (These are never negative, but the one formatter is the one that is right.)
+				char num[12];
+				ui::format_x100(num, sizeof(num), d.decimals == 1 ? v * 10 : v * 100, d.decimals);
+				snprintf(text[n], sizeof(text[n]), "%s: %s %s", r.label, num, d.unit);
 				break;
 			}
 			default:
@@ -501,14 +512,7 @@ namespace
 		const NumberDef &d = NUMBERS[(int)editing];
 
 		char num[16];
-		if (d.decimals == 1)
-		{
-			snprintf(num, sizeof(num), "%d.%d", pending / 10, abs(pending % 10));
-		}
-		else
-		{
-			snprintf(num, sizeof(num), "%d", pending);
-		}
+		ui::format_x100(num, sizeof(num), d.decimals == 1 ? pending * 10 : pending * 100, d.decimals);
 
 		ui::set_value_edit(d.title, num, d.unit, d.sub ? d.sub(pending) : nullptr, d.hint);
 	}

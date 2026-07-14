@@ -109,10 +109,11 @@ namespace app
 
 	/** Install the device's onboarding codes. Call before run().
 	 *
-	 * With them, the menu offers a "Pairing code" entry that puts the QR and the manual code on
-	 * the panel. Without them -- a build with no radio -- that entry does not exist, and neither
-	 * does the view or the QR's draw buffer. So this is what decides it, not a compile switch:
-	 * the menu offers pairing when there is something to pair with.
+	 * With them, the menu offers a "Matter" row that puts the QR and the manual code on the panel.
+	 * Without them -- a build with no radio -- that row does not exist, and neither does the view, the
+	 * QR's draw buffer, the signal bars, or the mark on the splash. So this is what decides it, not a
+	 * compile switch: the menu offers pairing when there is something to pair with. (menu.cpp asks
+	 * app::has_radio(), which is this.)
 	 *
 	 * The strings are not copied. They must outlive run(), which never returns.
 	 *
@@ -166,6 +167,14 @@ namespace app
 	 * @return the reading, or INT32_MIN if the sensor has not answered yet
 	 */
 	int32_t last_temp_x100();
+
+	/** Throw the last reading away, because it no longer describes anything.
+	 *
+	 * Called when the temperature offset changes: the reading was taken under the old one, and no new
+	 * one can arrive while the menu is open. Predicting against it would quote a number that is
+	 * already wrong. Better to admit there is nothing to predict from.
+	 */
+	void forget_last_temp();
 
 	/** Report the radio state for the status bar, from any thread.
 	 *
