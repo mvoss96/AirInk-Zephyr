@@ -81,6 +81,17 @@ namespace app
 		 * @return whether a unit could be read at all
 		 */
 		bool (*unit_from_network)(ui::TempUnit *out);
+
+		/** How strong the link to the mesh is, for the bars in the status bar.
+		 *
+		 * Polled once a measurement tick. A signal strength has no event to fire -- it simply drifts
+		 * -- so there is nothing to subscribe to, and once every 30 s is far more often than a person
+		 * moving a device needs. Null in a build with no radio; the status bar then keeps its token.
+		 *
+		 * @param[out] out average RSSI to the parent router in dBm; untouched if this returns false
+		 * @return false when there is no parent to measure -- not joined, or joined and not a child
+		 */
+		bool (*link_rssi)(int8_t *out);
 	};
 
 	/** Install the observers. Call before run(). */

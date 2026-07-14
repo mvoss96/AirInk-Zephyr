@@ -21,6 +21,8 @@
 #include <app/clusters/power-source-server/power-source-server.h>
 #include <app/clusters/unit-localization-server/unit-localization-server.h>
 #include <app/server/Server.h>
+#include <openthread/thread.h>
+#include <platform/ThreadStackManager.h>
 #include <setup_payload/OnboardingCodesUtil.h>
 #include <setup_payload/QRCodeSetupPayloadGenerator.h>
 
@@ -317,6 +319,23 @@ bool UnitFromNetwork(ui::TempUnit *out)
 	return true;
 }
 
+/* How well the parent router hears us, for the status bar's bars.
+ *
+ * The average and not the last packet's RSSI: a single frame is noise, and the panel is not a
+ * spectrum analyser -- it is a hint about where to put the thing. OpenThread already keeps the
+ * average, so this is a read, not a measurement, and costs no radio time.
+ *
+ * Fails, correctly, whenever there is no parent to be heard by: not joined yet, or -- if this device
+ * ever stops being a sleepy child -- a router itself, which has no parent at all. */
+bool LinkRssi(int8_t *out)
+{
+	ThreadStackMgr().LockThreadStack();
+	const otError err = otThreadGetParentAverageRssi(ThreadStackMgrImpl().OTInstance(), out);
+	ThreadStackMgr().UnlockThreadStack();
+
+	return err == OT_ERROR_NONE && *out != OT_RADIO_RSSI_INVALID;
+}
+
 void AirInkThread(void *, void *, void *)
 {
 	const ::app::Hooks hooks = {
@@ -327,6 +346,7 @@ void AirInkThread(void *, void *, void *)
 		.pairing_dismissed = ShortenPairingWindow,
 		.publish_unit = PublishUnit,
 		.unit_from_network = UnitFromNetwork,
+		.link_rssi = LinkRssi,
 	};
 	::app::set_hooks(hooks);
 	::app::set_build_name("Matter over Thread");

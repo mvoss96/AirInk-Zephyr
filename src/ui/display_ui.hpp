@@ -154,6 +154,30 @@ namespace ui
 	/** The unit currently painted. The menu asks, so that a hold can toggle it. */
 	TempUnit temp_unit_shown();
 
+	/** How strong the Thread link is, so the status bar can show bars instead of a bare "TH".
+	 *
+	 * "TH" answers a question nobody has once the device is joined. The one they do have -- is it
+	 * standing somewhere it can actually reach the mesh? -- needs a strength, and this is it.
+	 *
+	 * The bars only appear on a joined Thread link (see set_link), and only once this has been called
+	 * at least once: four hollow bars mean "attached with no signal", which must not be confused with
+	 * "not measured yet".
+	 *
+	 * Deduped and hysteretic (ui::quantize_signal_bars): a link parked on a threshold does not get to
+	 * flip the panel back and forth at ~3 mAs a go.
+	 *
+	 * @param rssi_dbm average RSSI to the parent router, in dBm (negative)
+	 */
+	void set_signal(int rssi_dbm);
+
+	/** How many bars are drawn, 0..4, or -1 if nothing has been measured yet.
+	 *
+	 * The hysteresis lives in here, so this is the only place that knows whether a new reading
+	 * actually moved the display -- which is what the log wants to say, and the only thing worth
+	 * saying about a number that drifts by a dB every half minute.
+	 */
+	int signal_bars();
+
 	/** Select the error view and stage its text.
 	 *
 	 * @param title  headline, e.g. "SENSOR ERROR"; NULL keeps the previous one

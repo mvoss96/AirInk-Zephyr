@@ -271,6 +271,37 @@ static void pull_unit()
 	ui::set_temp_unit(u);
 }
 
+/** Ask the radio how well it is heard, for the bars in the status bar.
+ *
+ * Nothing announces a signal strength -- it drifts -- so it is asked for, once a tick. On a build with
+ * no radio, or before the device has a parent to be a child of, there is nothing to ask and the status
+ * bar keeps the token it already has.
+ */
+static void pull_signal()
+{
+	if (!hooks.link_rssi)
+	{
+		return;
+	}
+
+	int8_t rssi;
+	if (!hooks.link_rssi(&rssi))
+	{
+		return;
+	}
+
+	// Log only when the bars actually move. The dBm behind them drifts a little every half minute and
+	// saying so every time would drown the log in noise -- but the moment the panel changes is worth
+	// a line, because that is the line you read when you are deciding where to put the device.
+	const int before = ui::signal_bars();
+	ui::set_signal(rssi);
+	const int after = ui::signal_bars();
+	if (after != before)
+	{
+		printk("[SIG] %d dBm -> %d bars\n", rssi, after);
+	}
+}
+
 /** The main app loop */
 static void app_loop()
 {
@@ -284,6 +315,7 @@ static void app_loop()
 		const int64_t now = k_uptime_get();
 		const battery::State bat = poll_battery();
 		pull_unit();
+		pull_signal();
 
 		if (bat.low)
 		{

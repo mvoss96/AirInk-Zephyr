@@ -136,6 +136,34 @@ int main(int argc, char **argv)
 	ui::refresh();
 	snapshot("sensor");
 
+	// The signal bars, every level, because the whole point of them is being read at a glance from
+	// across a room -- and one bar has to look unmistakably unlike four. Only the radio build has a
+	// mesh to measure; the other keeps its "--".
+	if (matter)
+	{
+		const struct
+		{
+			int rssi;
+			const char *name;
+		} levels[] = {
+			{-55, "signal_4"},	// next to the router
+			{-70, "signal_3"},	//
+			{-80, "signal_2"},	//
+			{-90, "signal_1"},	// on the edge
+			{-100, "signal_0"}, // attached, and barely
+		};
+		for (const auto &l : levels)
+		{
+			g_tick_ms += 100;
+			ui::set_signal(l.rssi);
+			ui::refresh();
+			snapshot(l.name);
+		}
+		g_tick_ms += 100;
+		ui::set_signal(-55); // back to a healthy link for the screens that follow
+		ui::refresh();
+	}
+
 	g_tick_ms += 100;
 	ui::set_battery(42, false);		  // bolt -> percentage
 	ui::set_sensor(1487, 2680, 6200); // wide values, view already selected

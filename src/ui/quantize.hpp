@@ -40,6 +40,39 @@ namespace ui
 		return ((f_x100 + (f_x100 >= 0 ? 50 : -50)) / 100) * 100;
 	}
 
+	/** How many signal bars a Thread link of this strength earns: 0 (attached, but barely) to 4.
+	 *
+	 * The thresholds are ordinary 2.4 GHz ones and the exact dBm are a judgement call, but the
+	 * hysteresis is not decoration. This value feeds the same dedup as everything else in the status
+	 * bar, so a link sitting on a boundary -- which is precisely what a badly placed device does --
+	 * would flip the bar count back and forth and buy a ~3 mAs e-paper refresh every 30 s for the
+	 * privilege. Once a level is held, it takes SIGNAL_HYST_DB of real change to leave it.
+	 *
+	 * (The battery percentage has the same disease and no cure yet; see docs/power-analysis.md.)
+	 *
+	 * @param rssi_dbm  average RSSI to the parent router, in dBm (negative; ~-40 near, ~-100 at the edge)
+	 * @param prev_bars what is on the panel now, so the level can be held; 0..4, or -1 for "nothing yet"
+	 * @return 0..4
+	 */
+	inline int quantize_signal_bars(int rssi_dbm, int prev_bars)
+	{
+		constexpr int SIGNAL_HYST_DB = 3;
+		// The RSSI needed to REACH each level. Index is the bar count; [0] is unreachable by design,
+		// because 0 bars is what you get when you clear none of the others.
+		constexpr int reach[5] = {-128, -95, -85, -75, -65};
+
+		for (int b = 4; b >= 1; b--)
+		{
+			// Already at this level or above it? Then hold on a few dB longer before giving it up.
+			const int t = (b <= prev_bars) ? reach[b] - SIGNAL_HYST_DB : reach[b];
+			if (rssi_dbm >= t)
+			{
+				return b;
+			}
+		}
+		return 0;
+	}
+
 	/** Round a humidity to the whole percent the panel shows.
 	 *
 	 * @param hum_x100 relative humidity in hundredths of a percent (never negative)

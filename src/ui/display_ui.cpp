@@ -75,6 +75,13 @@ namespace
 	lv_obj_t *batt_frame, *batt_fill, *batt_bolt, *batt_pct_lbl, *link_lbl;
 	int last_charging = -1;
 
+	/* The signal bars, shown in place of the link token once there is a Thread network to measure.
+	 * Four ascending bars: filled = earned, outline = not. They and link_lbl are never both up --
+	 * "TH" and a set of bars would say the same thing twice, and the bars say it better. */
+	constexpr int SIGNAL_BARS = 4;
+	lv_obj_t *signal_bar[SIGNAL_BARS];
+	int last_bars = -1; // -1 = nothing measured yet
+
 	/* Charging bolt as a filled 1bpp image (I1: index0 = black bolt, index1 =
 	 * white bg, which is invisible on the white status bar). Shown in place of
 	 * the percentage while charging. 12x16, generated from ASCII art. */
@@ -368,6 +375,20 @@ namespace
 		}
 	}
 
+	/** Show or hide one widget. LVGL only offers add/clear of the flag, which turns every
+	 * "show this, hide that" into a ternary that reads backwards. */
+	void set_hidden(lv_obj_t *o, bool hidden)
+	{
+		if (hidden)
+		{
+			lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
+		}
+		else
+		{
+			lv_obj_clear_flag(o, LV_OBJ_FLAG_HIDDEN);
+		}
+	}
+
 	/** Hide every content view, so refresh() can un-hide exactly one.
 	 *
 	 * Driven off the View enum, not off a list kept by hand. The hand-kept one silently
@@ -462,10 +483,38 @@ namespace
 		lv_obj_align_to(batt_bolt, batt_frame, LV_ALIGN_OUT_RIGHT_MID, 10, 0);
 		lv_obj_add_flag(batt_bolt, LV_OBJ_FLAG_HIDDEN);
 
-		// Link: short text token, right-aligned.
+		// Link: short text token, right-aligned. What it says is "which radio, and is it up yet" --
+		// BLE while commissioning, "TH.." while joining, "--" when there is nothing. Once a Thread
+		// network is actually joined it steps aside for the bars below, which answer the question a
+		// joined device raises instead: is it standing anywhere useful?
 		link_lbl = make_label(status_bar, &b612_14, 0);
 		lv_obj_align(link_lbl, LV_ALIGN_RIGHT_MID, -6, 0);
 		lv_label_set_text(link_lbl, link_token(ui::Link::None));
+
+		// Four bars on a shared baseline, ascending. Filled = earned; an empty outline = the level
+		// exists but is not reached, which is what makes "one bar" read as one OF four rather than
+		// as a lonely rectangle. Drawn right to left from the same anchor as the token above.
+		//
+		// The sizes are not free choices. A 1 px border needs an interior big enough to still look
+		// like a hole on a 1-bit panel: at 4x4 the smallest bar had 2x2 white left in it and read as
+		// solid, which made "attached, no signal" indistinguishable from "one bar" -- the two states a
+		// person carrying the device around most needs told apart.
+		constexpr int BAR_W = 5, BAR_GAP = 2, BAR_STEP = 3, BAR_MIN_H = 6;
+		for (int i = 0; i < SIGNAL_BARS; i++)
+		{
+			const int h = BAR_MIN_H + i * BAR_STEP; // 6, 9, 12, 15
+			signal_bar[i] = lv_obj_create(status_bar);
+			lv_obj_remove_style_all(signal_bar[i]);
+			lv_obj_set_size(signal_bar[i], BAR_W, h);
+			lv_obj_set_style_border_color(signal_bar[i], lv_color_black(), 0);
+			lv_obj_set_style_bg_color(signal_bar[i], lv_color_black(), 0);
+			lv_obj_clear_flag(signal_bar[i], LV_OBJ_FLAG_SCROLLABLE);
+			// BOTTOM_RIGHT so they sit on one baseline whatever their height; the -1 lifts them off
+			// the divider that closes the bar.
+			lv_obj_align(signal_bar[i], LV_ALIGN_BOTTOM_RIGHT,
+						 -6 - (SIGNAL_BARS - 1 - i) * (BAR_W + BAR_GAP), -4);
+			lv_obj_add_flag(signal_bar[i], LV_OBJ_FLAG_HIDDEN); // until there is a link to measure
+		}
 
 		// Divider under the bar.
 		lv_obj_t *sep = make_divider(status_bar, SCR_W, 1);
@@ -1084,9 +1133,61 @@ void ui::set_link(Link state)
 	{
 		return;
 	}
+
+	// Exactly one of the two is up. On a joined Thread network the bars take over -- but only once a
+	// strength has actually been measured: between joining and the first reading there is nothing to
+	// draw, and four empty outlines would claim there is (they mean "attached, no signal", which is
+	// a real and much worse state than "not asked yet"). So the token holds the place until then.
+	const bool bars = (state == Link::ThreadConnected) && (last_bars >= 0);
+	for (int i = 0; i < SIGNAL_BARS; i++)
+	{
+		set_hidden(signal_bar[i], !bars);
+	}
+	set_hidden(link_lbl, bars);
 	lv_label_set_text(link_lbl, link_token(state));
+
 	last_link = (int)state;
 	dirty = true;
+}
+
+void ui::set_signal(int rssi_dbm)
+{
+	if (!ready)
+	{
+		return;
+	}
+
+	const int bars = quantize_signal_bars(rssi_dbm, last_bars);
+	if (bars == last_bars)
+	{
+		return; // same number of bars already drawn; the dBm behind them are nobody's business
+	}
+
+	for (int i = 0; i < SIGNAL_BARS; i++)
+	{
+		// Earned bars are solid; the rest are hollow, so the scale stays visible.
+		const bool on = (i < bars);
+		lv_obj_set_style_bg_opa(signal_bar[i], on ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+		lv_obj_set_style_border_width(signal_bar[i], on ? 0 : 1, 0);
+	}
+
+	// The first measurement is also what lets the bars replace the token -- see set_link().
+	if (last_bars < 0 && last_link == (int)Link::ThreadConnected)
+	{
+		for (int i = 0; i < SIGNAL_BARS; i++)
+		{
+			set_hidden(signal_bar[i], false);
+		}
+		set_hidden(link_lbl, true);
+	}
+
+	last_bars = bars;
+	dirty = true;
+}
+
+int ui::signal_bars()
+{
+	return last_bars;
 }
 
 void ui::set_menu(Menu selected)
