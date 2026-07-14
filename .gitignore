@@ -5,3 +5,7 @@ sim/out/
 
 # Local MCP config (machine-specific absolute paths to the ppk2-mcp server)
 .mcp.json
+
+# Copies of <repo>/VERSION, dropped into each app dir by cmake/airink_version.cmake because Zephyr
+# insists on finding one there. The one you edit is the one in the root.
+apps/*/VERSION

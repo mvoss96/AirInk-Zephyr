@@ -27,6 +27,10 @@ list(APPEND EXTRA_CONF_FILE ${AIRINK_ROOT}/conf/airink_hw.conf)
 # The `matter_` prefix is how sysbuild routes a variable to this image rather than to itself; a bare
 # -DAIRINK_POWER=y would land in the sysbuild cache and never be forwarded. See that file's header.
 
+# The firmware version -- one file, <repo>/VERSION, for both apps and the panel. Must precede
+# find_package(Zephyr): that is what loads version.cmake.
+include(${AIRINK_ROOT}/cmake/airink_version.cmake)
+
 find_package(Zephyr HINTS $ENV{ZEPHYR_BASE})
 
 project(airink-matter)

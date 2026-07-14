@@ -11,6 +11,10 @@ list(APPEND DTS_ROOT ${AIRINK_ROOT})
 # facts only -- see the file's header.
 list(APPEND EXTRA_CONF_FILE ${AIRINK_ROOT}/conf/airink_hw.conf)
 
+# The firmware version -- one file, <repo>/VERSION, for both apps and the panel. Must precede
+# find_package(Zephyr): that is what loads version.cmake.
+include(${AIRINK_ROOT}/cmake/airink_version.cmake)
+
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 
 project(AirInk)

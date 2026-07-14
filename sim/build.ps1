@@ -33,7 +33,21 @@ $obj = Join-Path $sim "build"
 New-Item -ItemType Directory -Force -Path $out, $obj | Out-Null
 
 $inc = @("-I$Lvgl", "-I$sim", "-I$src")
-$def = @("-DLV_CONF_INCLUDE_SIMPLE")
+
+# The version comes from the one place it exists, <repo>/VERSION -- the same file Zephyr reads to
+# build APP_VERSION_STRING for the firmware. Here there is no Zephyr and so no generated header, so
+# parse it and hand it to the compiler. src/version.hpp errors out if this is missing rather than
+# quietly inventing a number, because a preview that shows a version the device does not have is
+# worse than one that will not build.
+$verFile = Get-Content (Join-Path $root "VERSION") -Raw
+$maj = [regex]::Match($verFile, 'VERSION_MAJOR\s*=\s*(\d+)').Groups[1].Value
+$min = [regex]::Match($verFile, 'VERSION_MINOR\s*=\s*(\d+)').Groups[1].Value
+$pat = [regex]::Match($verFile, 'PATCHLEVEL\s*=\s*(\d+)').Groups[1].Value
+if (-not ($maj -and $min -and $pat)) { throw "Could not read a version out of $root\VERSION" }
+$version = "$maj.$min.$pat"
+Write-Host "==> Version $version (from VERSION)" -ForegroundColor DarkGray
+
+$def = @("-DLV_CONF_INCLUDE_SIMPLE", "-DAIRINK_VERSION=`"\`"$version\`"`"")
 $warn = @("-w")   # LVGL is noisy; we only care about our own code compiling
 
 Write-Host "==> Compiling C++ (UI + sim harness)" -ForegroundColor Cyan
