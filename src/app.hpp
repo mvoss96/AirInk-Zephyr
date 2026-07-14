@@ -143,8 +143,9 @@ namespace app
 
 	/** Tell the network the user picked a unit on the panel.
 	 *
-	 * Calls Hooks::publish_unit, if there is one. The menu calls this after it has changed the unit
-	 * and written it down; a build with no network has no hook and this does nothing.
+	 * Calls Hooks::publish_unit, if there is one. prefs calls this itself whenever the unit changes on
+	 * the device -- telling the network is part of what changing the unit MEANS, not an errand for
+	 * whoever happened to change it. A build with no network has no hook and this does nothing.
 	 */
 	void publish_unit(ui::TempUnit u);
 

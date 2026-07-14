@@ -5,60 +5,82 @@
 #include "ui/display_ui.hpp" // ui::TempUnit -- the unit is a display preference, so it is declared there
 
 /** @file
- * The settings the user owns, kept across a reboot.
+ * The settings the user owns: kept across a reboot, and put where they have to act.
  *
  * This is the device's only persistent store. Until it existed, nothing the user chose survived a
  * power cycle -- which is why the temperature unit could not be offered at all. The sensor's own trim
- * could not either: the SCD41 does have an EEPROM, but it is good
- * for a few thousand writes, and these are settings a user sits and turns until the panel agrees with
- * the thermometer in their hand. So they live here, in NVS, and are written into the sensor's RAM on
- * every boot -- see scd41::set_trim().
+ * could not either: the SCD41 does have an EEPROM, but it is good for a few thousand writes, and these
+ * are settings a user sits and turns until the panel agrees with the thermometer in their hand. So they
+ * live here, in NVS, and are written into the sensor's RAM on every boot -- see scd41::set_trim().
  *
  * Backed by Zephyr settings over NVS in the "storage" partition (dts/airink_flash.dtsi: 0xEC000,
- * 32 KB) -- the same partition the Matter build keeps its fabrics in, under keys of our own. A write
- * happens only when the user changes something.
+ * 32 KB) -- the same partition the Matter build keeps its fabrics in, under keys of our own.
  *
- * The values are ints and bools and nothing else, and the store knows them by name. A new setting is
- * a new key and a new pair of accessors; there is no schema to migrate and no struct to version.
+ * ---- Why there is one setter and not five ----
+ *
+ * A setting here has more than one home. The unit lives in flash AND on the panel AND (on a radio
+ * build) in a Matter cluster; the trim lives in flash AND in the sensor's RAM. Keeping those in step
+ * used to be the caller's job, and every caller did it slightly differently: four setters in menu.cpp,
+ * each with its own hand-written aftermath, and a push_trim() that the fifth setting would have been
+ * free to forget. Nothing would have complained -- the device would simply have stored the altitude
+ * and never told the sensor, until the next reboot quietly fixed it.
+ *
+ * So the aftermath belongs to the setting, not to whoever changed it. set() clamps the value, writes
+ * it down, and applies it -- and a new setting is a row in one table (prefs.cpp), not a new function
+ * here plus a new ritual there.
  */
 namespace prefs
 {
-	/** Load what was saved. Safe to call after the Matter stack has already initialised settings.
+	/** Every setting the user owns. The order is the table's order in prefs.cpp. */
+	enum Id : uint8_t
+	{
+		Unit,		// ui::TempUnit
+		TempOffset, // tenths of a degree C, subtracted by the sensor
+		Altitude,	// metres above sea level
+		AutoCalib,	// the SCD41's self-calibration, 0/1
+		COUNT,
+	};
+
+	/** Load what was saved, but do NOT act on it yet -- see apply_all().
 	 *
-	 * A device with nothing saved yet -- factory-new, or freshly reset -- gets the defaults, which is
-	 * not an error.
+	 * A device with nothing saved -- factory-new, or freshly reset -- gets the defaults, which is not
+	 * an error. Neither is a store that will not come up: the getters still answer, and a set() will
+	 * report the failure rather than pretend it saved.
 	 *
 	 * @retval 0        the store is up; whatever was saved has been loaded
-	 * @retval negative the store is unavailable; the getters still answer, with defaults, and a
-	 *                  set_*() will report the failure rather than pretend it saved
+	 * @retval negative the store is unavailable
 	 */
 	int init();
 
-	/** The unit the panel should show. Celsius until someone says otherwise. */
-	ui::TempUnit temp_unit();
-
-	/** Change the unit and write it down.
+	/** Put every setting where it has to act: the panel, the sensor, the network.
 	 *
-	 * The value takes effect for temp_unit() even if the write fails -- the user asked for it, and a
-	 * flash that will not take it is not a reason to also ignore the request for this session.
-	 *
-	 * @return 0, or a negative error from the store (the value is still changed)
+	 * Separate from init() because the things a setting acts ON are not up yet when the settings are
+	 * read -- the display and the SCD41 are brought up after. Call once, after both.
 	 */
-	int set_temp_unit(ui::TempUnit u);
+	void apply_all();
 
-	/** What the SCD41 has been told about where it is standing. Defaults are scd41::Trim's.
-	 *
-	 * The struct is the sensor's, not a copy of it: there is one description of what a trim IS, and
-	 * this is where the last one the user chose is kept.
-	 */
-	const scd41::Trim &trim();
+	/** What a setting is now, in its stored units. A bool is 0 or 1; the unit is ui::TempUnit's value. */
+	int32_t get(Id id);
 
-	/** Change one part of the trim and write it down. The sensor is NOT told -- that is the caller's
-	 * job (scd41::set_trim), because only the caller knows whether the sensor is busy measuring.
+	/** What a valid value is. The store clamps to this, and the menu's editor offers exactly it -- a
+	 * range the user can dial in but the store would refuse is a promise the panel cannot keep. */
+	int32_t lo(Id id);
+	int32_t hi(Id id);
+
+	/** The user chose this, here, on the panel.
 	 *
-	 * @return 0, or a negative error from the store (the value is still changed)
+	 * Clamps it, writes it down, and applies it -- which for the unit includes telling the network.
+	 * A value that did not actually move costs nothing: no flash write, no I2C, no radio.
+	 *
+	 * The value takes effect even if the write to flash fails. The user asked for it, and a store that
+	 * will not take it is not a reason to also ignore them for the rest of the session.
 	 */
-	int set_temp_offset_x10(int tenths_c);
-	int set_altitude_m(int metres);
-	int set_auto_calib(bool on);
+	void set(Id id, int32_t v);
+
+	/** The network chose this, and we are adopting it.
+	 *
+	 * Identical to set(), minus the one thing that would be absurd: telling the network what it has
+	 * just told us.
+	 */
+	void adopt(Id id, int32_t v);
 }

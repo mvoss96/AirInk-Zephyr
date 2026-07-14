@@ -307,8 +307,9 @@ static void onboarding()
  * It is a poll and not a callback because the cluster gives us nothing to hang a callback on; see
  * Hooks::unit_from_network. Once a tick is not a compromise here: the e-paper cannot show it sooner.
  *
- * Whatever comes in goes to prefs as well, so the device boots on the last thing anyone chose --
- * whoever chose it, and wherever.
+ * What comes in goes into prefs, which repaints the panel and writes it down -- so the device boots on
+ * the last thing anyone chose, whoever chose it and wherever. adopt() and not set(), because the one
+ * thing that must NOT happen is telling the network what the network has just told us.
  */
 static void pull_unit()
 {
@@ -317,15 +318,19 @@ static void pull_unit()
 		return; // no network, no second opinion
 	}
 
+	// Compared against the STORE and not against the panel: prefs is where the unit lives, and the
+	// panel is one of the places it is shown. (They cannot disagree -- prefs paints it -- but comparing
+	// against the mirror to decide whether to write the original is the kind of thing that stays true
+	// only by luck.) A value that has not moved would be dropped by prefs anyway; the point of the
+	// guard is the log line below, which would otherwise appear every half minute for ever.
 	ui::TempUnit u;
-	if (!hooks.unit_from_network(&u) || u == ui::temp_unit_shown())
+	if (!hooks.unit_from_network(&u) || (int32_t)u == prefs::get(prefs::Unit))
 	{
 		return;
 	}
 
 	printk("[PREFS] temp unit %s (from the network)\n", u == ui::TempUnit::Fahrenheit ? "F" : "C");
-	prefs::set_temp_unit(u);
-	ui::set_temp_unit(u);
+	prefs::adopt(prefs::Unit, (int32_t)u);
 }
 
 /** Ask the radio how well it is heard, for the bars in the status bar.
@@ -464,19 +469,6 @@ void app::run()
 
 	const bool display_ok = (ui::init(ui_cfg) == 0);
 
-	// init() shows the splash, not the readings, so this lands before the user could see the wrong
-	// unit -- and it costs no extra refresh.
-	ui::set_temp_unit(prefs::temp_unit());
-
-	// ...and outward, before the loop ever polls the other way. The Matter cluster reloads a value of
-	// its own on boot, so if we only ever listened, its copy would win every restart and the unit the
-	// user set on the panel would not survive one. Pushing first makes prefs the authority and the
-	// cluster the mirror; from here on they only ever move together.
-	if (hooks.publish_unit)
-	{
-		hooks.publish_unit(prefs::temp_unit());
-	}
-
 	printk("AirInk v%s %s (%s %s) started (display %s)\n",
 		   AIRINK_VERSION, build_name, __DATE__, __TIME__, display_ok ? "ok" : "FAILED");
 
@@ -488,11 +480,21 @@ void app::run()
 		k_sleep(K_FOREVER); // leave the error on screen
 	}
 
-	// What the user told the sensor about where it is standing -- the temperature offset, the
-	// altitude, whether it may trim itself. It lives in our NVS and not in the sensor's EEPROM (see
-	// scd41::set_trim), so it has to be handed back every boot. Survivable if it fails: the sensor
-	// keeps measuring, just with the factory's idea of the room instead of the user's.
-	scd41::set_trim(prefs::trim());
+	/* Everything the user has ever chosen, put where it acts -- and this is the first moment it can be,
+	 * because until now there was nothing to put it INTO: the panel had not been built and the sensor
+	 * had not answered. The splash is still up, so nobody sees a temperature in the wrong unit.
+	 *
+	 * What it does, per prefs's table: the unit onto the panel and outward to the network; the trim
+	 * (offset, altitude, self-calibration) into the SCD41's RAM, where it has to be written back on
+	 * every boot because we keep it in our NVS and not in the sensor's EEPROM (see scd41::set_trim).
+	 *
+	 * Pushing the unit OUT before the loop ever polls the other way is what settles the argument: the
+	 * Matter cluster reloads a copy of its own on boot, so a device that only ever listened would let
+	 * the controller's copy win every restart, and the unit the user set on the panel would not survive
+	 * one. prefs is the authority; the cluster is the mirror.
+	 *
+	 * Survivable if the sensor refuses: it keeps measuring, just with the factory's idea of the room. */
+	prefs::apply_all();
 
 	if (battery::init() < 0)
 	{

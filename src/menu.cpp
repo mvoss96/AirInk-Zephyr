@@ -92,67 +92,40 @@ namespace
 	};
 
 	// ---- the toggles and the numbers, once each ---------------------------------------------
+	//
+	// A toggle or a number is a VIEW onto one stored setting. It says which setting, and how to show
+	// it; prefs does everything else -- clamps the value, writes it down, and puts it where it has to
+	// act. That is why there are no setters here any more. There used to be four, each with its own
+	// hand-written aftermath (tell the sensor, tell the panel, tell the network), and the fifth setting
+	// would have been free to forget one of them -- silently, because nothing checks an aftermath.
 
 	struct ToggleDef
 	{
+		prefs::Id id;
 		const char *off, *on; // what the row shows for the value
-		bool (*get)();
-		void (*set)(bool);
 	};
 
 	struct NumberDef
 	{
+		prefs::Id id;
 		const char *title;	// the editor's headline
 		const char *unit;	// what the number is measured in
-		int lo, hi, step;	// in stored units, and it wraps: hi steps back round to lo
+		int step;			// in stored units; it wraps, and the range it wraps in is prefs's --
+							// a value the editor offers but the store would refuse is a lie
 		uint8_t decimals;	// 1 -> the stored value is tenths
 		const char *hint;	// what a tap does
 		const char *(*sub)(int pending); // the line under the number; nullptr = none
-		int (*get)();
-		void (*set)(int);
+		void (*after)();				 // what only the MENU can know to do; nullptr = nothing
 	};
 
-	// -- units: the one toggle that is not about the sensor ------------------------------------
-
-	bool units_get() { return ui::temp_unit_shown() == ui::TempUnit::Fahrenheit; }
-	void units_set(bool fahrenheit)
-	{
-		const ui::TempUnit u = fahrenheit ? ui::TempUnit::Fahrenheit : ui::TempUnit::Celsius;
-		prefs::set_temp_unit(u);
-		ui::set_temp_unit(u);
-		app::publish_unit(u); // so a controller's copy agrees; no-op in a build with no network
-	}
-
-	// -- the sensor's trim: prefs remembers it, the sensor is told ------------------------------
-
-	void push_trim() { scd41::set_trim(prefs::trim()); }
-
-	bool asc_get() { return prefs::trim().auto_calib; }
-	void asc_set(bool on)
-	{
-		prefs::set_auto_calib(on);
-		push_trim();
-	}
-
-	int offset_get() { return prefs::trim().temp_offset_x10; }
-	void offset_set(int v)
-	{
-		prefs::set_temp_offset_x10(v);
-		push_trim();
-
-		// The last reading was taken under the OLD offset, and no measurement can happen while the
-		// menu is up. Keeping it would make the editor predict against a number that is already wrong
-		// -- re-open it after a save and it would quote the reading from before the change. Better to
-		// say "no reading yet" for the half minute until there is one again.
-		app::forget_last_temp();
-	}
-
-	int altitude_get() { return prefs::trim().altitude_m; }
-	void altitude_set(int v)
-	{
-		prefs::set_altitude_m(v);
-		push_trim();
-	}
+	/** The last reading was taken under the old offset, and no measurement can happen while the menu is
+	 * up. Keeping it would make the editor predict against a number that is already wrong -- re-open it
+	 * after a save and it would quote the reading from before the change. Better to say "no reading
+	 * yet" for the half minute until there is one again.
+	 *
+	 * It lives here and not in prefs's aftermath because it is about the EDITOR, not about the setting:
+	 * the store has no idea anybody is predicting anything. */
+	void forget_reading() { app::forget_last_temp(); }
 
 	/** What the panel WILL say once a pending offset takes effect.
 	 *
@@ -176,7 +149,7 @@ namespace
 		}
 
 		// The prediction, in Celsius: what was measured, less the change we are about to make.
-		const int32_t delta_x100 = (pending_x10 - offset_get()) * 10;
+		const int32_t delta_x100 = (pending_x10 - prefs::get(prefs::TempOffset)) * 10;
 		const int32_t c_x100 = last - delta_x100;
 
 		// ...and shown in whatever unit the panel is in, because the thermometer in the user's hand
@@ -202,25 +175,25 @@ namespace
 	/* In enum order, and that order is the contract: C++ has no designated initialisers for arrays --
 	 * those are a C thing -- so the static_assert can only catch a missing entry, not a swapped one. */
 	const ToggleDef TOGGLES[] = {
-		{"\xC2\xB0"
-								"C",
-								"\xC2\xB0"
-								"F",
-								units_get, units_set},
-		{"Off", "On", asc_get, asc_set},
+		{prefs::Unit, "\xC2\xB0"
+					  "C",
+					  "\xC2\xB0"
+					  "F"},
+		{prefs::AutoCalib, "Off", "On"},
 	};
-	static_assert(sizeof(TOGGLES) / sizeof(TOGGLES[0]) == (size_t)Toggle::Count, "a toggle with no definition");
+	static_assert(sizeof(TOGGLES) / sizeof(TOGGLES[0]) == (size_t)Toggle::Count,
+				  "a toggle with no definition");
 
 	const NumberDef NUMBERS[] = {
-		{"TEMP OFFSET",
-									 "\xC2\xB0"
-									 "C",
-									 0, 200, 5, 1, "Tap = +0.5     Hold = save", offset_sub,
-									 offset_get, offset_set},
-		{"ALTITUDE", "m", 0, 3000, 100, 0, "Tap = +100     Hold = save",
-								   altitude_sub, altitude_get, altitude_set},
+		{prefs::TempOffset, "TEMP OFFSET",
+		 "\xC2\xB0"
+		 "C",
+		 5, 1, "Tap = +0.5     Hold = save", offset_sub, forget_reading},
+		{prefs::Altitude, "ALTITUDE", "m", 100, 0, "Tap = +100     Hold = save", altitude_sub,
+		 nullptr},
 	};
-	static_assert(sizeof(NUMBERS) / sizeof(NUMBERS[0]) == (size_t)Number::Count, "a number with no definition");
+	static_assert(sizeof(NUMBERS) / sizeof(NUMBERS[0]) == (size_t)Number::Count,
+				  "a number with no definition");
 
 	// ---- THE MENU ---------------------------------------------------------------------------
 
@@ -349,13 +322,14 @@ namespace
 			case Kind::Toggle:
 			{
 				const ToggleDef &t = TOGGLES[r.id];
-				snprintf(text[n], sizeof(text[n]), "%s: %s", r.label, t.get() ? t.on : t.off);
+				snprintf(text[n], sizeof(text[n]), "%s: %s", r.label,
+						 prefs::get(t.id) ? t.on : t.off);
 				break;
 			}
 			case Kind::Number:
 			{
 				const NumberDef &d = NUMBERS[r.id];
-				const int v = d.get();
+				const int v = prefs::get(d.id);
 				// The stored value is in tenths when decimals==1, so scale to the hundredths format_x100
 				// speaks. (These are never negative, but the one formatter is the one that is right.)
 				char num[12];
@@ -520,7 +494,7 @@ namespace
 	void to_editing(Number n)
 	{
 		editing = n;
-		pending = NUMBERS[(int)n].get();
+		pending = prefs::get(NUMBERS[(int)n].id);
 		go(State::Editing);
 		idle_at = k_uptime_get() + PROMPT_IDLE_MS;
 		draw_editing();
@@ -543,7 +517,7 @@ namespace
 			// No screen, no state: the row says which way it is, and a hold turns it the other way.
 			// A screen would only be a place to press the button a second time.
 			const ToggleDef &t = TOGGLES[r.id];
-			t.set(!t.get());
+			prefs::set(t.id, prefs::get(t.id) ? 0 : 1);
 			idle_at = k_uptime_get() + MENU_IDLE_MS;
 			draw(sel); // the row rewrites itself, because draw() reads the value
 			return menu::Status::Running;
@@ -632,17 +606,21 @@ menu::Status menu::proceed(button::Event e)
 			// It wraps, because one button has no way back. The range is small enough for that to be
 			// a shrug rather than a punishment: 41 taps at the very worst, for a value set once.
 			pending += d.step;
-			if (pending > d.hi)
+			if (pending > prefs::hi(d.id))
 			{
-				pending = d.lo;
+				pending = prefs::lo(d.id);
 			}
 			idle_at = now + PROMPT_IDLE_MS;
 			draw_editing();
 		}
 		else if (e == button::Event::Long)
 		{
-			d.set(pending); // writes it down and tells the sensor
-			to_list(list);	// straight back to the row, which now shows the new value
+			prefs::set(d.id, pending); // writes it down, and tells whoever else holds a copy
+			if (d.after)
+			{
+				d.after();
+			}
+			to_list(list); // straight back to the row, which now shows the new value
 		}
 		else if (now >= idle_at)
 		{
