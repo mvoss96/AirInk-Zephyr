@@ -114,6 +114,7 @@ namespace
 									  : ui::TempUnit::Celsius;
 		prefs::set_temp_unit(next);
 		ui::set_temp_unit(next);
+		app::publish_unit(next); // so a controller's copy agrees; no-op in a build with no network
 
 		// Stay on Root, cursor untouched -- but the row's text just changed, so the menu has to be
 		// re-staged for the refresh that follows.

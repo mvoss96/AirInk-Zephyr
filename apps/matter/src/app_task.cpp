@@ -19,6 +19,7 @@
 #include <app/clusters/air-quality-server/air-quality-server.h>
 #include <app/clusters/concentration-measurement-server/concentration-measurement-server.h>
 #include <app/clusters/power-source-server/power-source-server.h>
+#include <app/clusters/unit-localization-server/unit-localization-server.h>
 #include <app/server/Server.h>
 #include <setup_payload/OnboardingCodesUtil.h>
 #include <setup_payload/QRCodeSetupPayloadGenerator.h>
@@ -280,6 +281,42 @@ void FactoryReset()
 	Server::GetInstance().ScheduleFactoryReset();
 }
 
+/* The Unit Localization cluster (0x002D on the root node) is how a controller reads and sets the unit
+ * the device displays. Note what it is NOT: the temperature itself stays Celsius on the wire, always
+ * -- Matter reports centi-degrees Celsius and Home Assistant renders them in whatever the user's
+ * profile says. This cluster is about the panel, and only the panel.
+ *
+ * The SDK's server is a closed singleton: it holds the value, persists it, and reports it, and hands
+ * the application neither a delegate nor a callback. So the traffic goes both ways by hand -- pushed
+ * out here, polled back in by the loop (see ::app::Hooks::unit_from_network). */
+ui::TempUnit FromMatter(UnitLocalization::TempUnitEnum u)
+{
+	return u == UnitLocalization::TempUnitEnum::kFahrenheit ? ui::TempUnit::Fahrenheit
+							       : ui::TempUnit::Celsius;
+}
+
+void PublishUnit(ui::TempUnit u)
+{
+	const auto unit = (u == ui::TempUnit::Fahrenheit) ? UnitLocalization::TempUnitEnum::kFahrenheit
+							  : UnitLocalization::TempUnitEnum::kCelsius;
+
+	PlatformMgr().LockChipStack();
+	const CHIP_ERROR err = UnitLocalization::UnitLocalizationServer::Instance().SetTemperatureUnit(unit);
+	PlatformMgr().UnlockChipStack();
+
+	if (err != CHIP_NO_ERROR) {
+		LOG_ERR("Could not publish the temperature unit (%s)", err.AsString());
+	}
+}
+
+bool UnitFromNetwork(ui::TempUnit *out)
+{
+	PlatformMgr().LockChipStack();
+	*out = FromMatter(UnitLocalization::UnitLocalizationServer::Instance().GetTemperatureUnit());
+	PlatformMgr().UnlockChipStack();
+	return true;
+}
+
 void AirInkThread(void *, void *, void *)
 {
 	const ::app::Hooks hooks = {
@@ -288,6 +325,8 @@ void AirInkThread(void *, void *, void *)
 		.factory_reset = FactoryReset,
 		.pairing_open = OpenPairingWindow,
 		.pairing_dismissed = ShortenPairingWindow,
+		.publish_unit = PublishUnit,
+		.unit_from_network = UnitFromNetwork,
 	};
 	::app::set_hooks(hooks);
 	::app::set_build_name("Matter over Thread");

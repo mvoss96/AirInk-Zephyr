@@ -61,6 +61,14 @@ void app::open_pairing()
 	}
 }
 
+void app::publish_unit(ui::TempUnit u)
+{
+	if (hooks.publish_unit)
+	{
+		hooks.publish_unit(u);
+	}
+}
+
 void app::set_link(ui::Link state)
 {
 	link_state = state;
@@ -233,6 +241,36 @@ static void onboarding()
 	}
 }
 
+/** Adopt a temperature unit the controller set, if it did.
+ *
+ * The other half of the menu's toggle. A user with the phone in their hand may well change the unit
+ * from Home Assistant rather than walk to the device, and the panel has to agree with what the app
+ * shows -- a thermometer that disagrees with its own record is worse than one with no app at all.
+ *
+ * It is a poll and not a callback because the cluster gives us nothing to hang a callback on; see
+ * Hooks::unit_from_network. Once a tick is not a compromise here: the e-paper cannot show it sooner.
+ *
+ * Whatever comes in goes to prefs as well, so the device boots on the last thing anyone chose --
+ * whoever chose it, and wherever.
+ */
+static void pull_unit()
+{
+	if (!hooks.unit_from_network)
+	{
+		return; // no network, no second opinion
+	}
+
+	ui::TempUnit u;
+	if (!hooks.unit_from_network(&u) || u == ui::temp_unit_shown())
+	{
+		return;
+	}
+
+	printk("[PREFS] temp unit %s (from the network)\n", u == ui::TempUnit::Fahrenheit ? "F" : "C");
+	prefs::set_temp_unit(u);
+	ui::set_temp_unit(u);
+}
+
 /** The main app loop */
 static void app_loop()
 {
@@ -245,6 +283,7 @@ static void app_loop()
 	{
 		const int64_t now = k_uptime_get();
 		const battery::State bat = poll_battery();
+		pull_unit();
 
 		if (bat.low)
 		{
@@ -339,6 +378,15 @@ void app::run()
 	// init() shows the splash, not the readings, so this lands before the user could see the wrong
 	// unit -- and it costs no extra refresh.
 	ui::set_temp_unit(prefs::temp_unit());
+
+	// ...and outward, before the loop ever polls the other way. The Matter cluster reloads a value of
+	// its own on boot, so if we only ever listened, its copy would win every restart and the unit the
+	// user set on the panel would not survive one. Pushing first makes prefs the authority and the
+	// cluster the mirror; from here on they only ever move together.
+	if (hooks.publish_unit)
+	{
+		hooks.publish_unit(prefs::temp_unit());
+	}
 
 	printk("AirInk v%s %s (%s %s) started (display %s)\n",
 		   AIRINK_VERSION, build_name, __DATE__, __TIME__, display_ok ? "ok" : "FAILED");

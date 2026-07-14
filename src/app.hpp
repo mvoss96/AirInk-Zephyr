@@ -60,6 +60,27 @@ namespace app
 		 *
 		 * Only ever called from the boot onboarding screen, and never once a fabric exists. */
 		void (*pairing_dismissed)();
+
+		/** Tell the network what unit the panel is now showing, because the user chose it here.
+		 *
+		 * Also called once at start-up, and that call is what settles who is in charge: the Matter
+		 * cluster keeps a value of its own and reloads it on boot, so without this the controller's
+		 * copy could quietly outvote the one the user set on the device. prefs is the authority; this
+		 * pushes it outward. Null in a build with no network. */
+		void (*publish_unit)(ui::TempUnit u);
+
+		/** What unit the network thinks the panel should show.
+		 *
+		 * Polled once a measurement tick, because there is nothing better: the SDK's Unit
+		 * Localization cluster is a closed singleton -- it persists and reports the value itself and
+		 * offers the application no callback, and being an AttributeAccessInterface it does not go
+		 * through MatterPostAttributeChangeCallback either. So a write from Home Assistant is not
+		 * announced; it can only be noticed. Once per tick is as fast as the panel can redraw anyway.
+		 *
+		 * @param[out] out the controller's unit; untouched if this returns false
+		 * @return whether a unit could be read at all
+		 */
+		bool (*unit_from_network)(ui::TempUnit *out);
 	};
 
 	/** Install the observers. Call before run(). */
@@ -107,6 +128,13 @@ namespace app
 	 * deliberate -- see menu.cpp.
 	 */
 	void open_pairing();
+
+	/** Tell the network the user picked a unit on the panel.
+	 *
+	 * Calls Hooks::publish_unit, if there is one. The menu calls this after it has changed the unit
+	 * and written it down; a build with no network has no hook and this does nothing.
+	 */
+	void publish_unit(ui::TempUnit u);
 
 	/** Report the radio state for the status bar, from any thread.
 	 *

@@ -86,6 +86,9 @@ void emberAfClusterInitCallback(EndpointId endpoint, ClusterId clusterId)
     case app::Clusters::ThreadNetworkDiagnostics::Id:
         emberAfThreadNetworkDiagnosticsClusterInitCallback(endpoint);
         break;
+    case app::Clusters::UnitLocalization::Id:
+        emberAfUnitLocalizationClusterInitCallback(endpoint);
+        break;
     default:
         // Unrecognized cluster ID
         break;
@@ -183,6 +186,11 @@ void __attribute__((weak)) emberAfTemperatureMeasurementClusterInitCallback(Endp
     (void) endpoint;
 }
 void __attribute__((weak)) emberAfThreadNetworkDiagnosticsClusterInitCallback(EndpointId endpoint)
+{
+    // To prevent warning
+    (void) endpoint;
+}
+void __attribute__((weak)) emberAfUnitLocalizationClusterInitCallback(EndpointId endpoint)
 {
     // To prevent warning
     (void) endpoint;
