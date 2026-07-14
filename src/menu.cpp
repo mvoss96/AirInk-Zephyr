@@ -1,6 +1,7 @@
 #include "menu.hpp"
 
 #include "app.hpp"
+#include "net.hpp"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -200,8 +201,8 @@ namespace
 	const Row ROOT[] = {
 		{Kind::Submenu, "Calibrate", (uint8_t)List::Calibrate},
 		{Kind::Toggle, "Units", (uint8_t)Toggle::Units},
-		{Kind::Screen, "Matter", (uint8_t)Screen::Matter, app::has_radio},
-		{Kind::Screen, "Factory reset", (uint8_t)Screen::FactoryReset, app::can_factory_reset},
+		{Kind::Screen, "Matter", (uint8_t)Screen::Matter, net::has_radio},
+		{Kind::Screen, "Factory reset", (uint8_t)Screen::FactoryReset, net::can_factory_reset},
 		{Kind::Leave, "Exit"},
 	};
 
@@ -404,11 +405,11 @@ namespace
 	{
 		go(State::Matter);
 		idle_at = k_uptime_get() + PROMPT_IDLE_MS;
-		if (!app::commissioned())
+		if (!net::commissioned())
 		{
-			app::open_pairing();
+			net::open_pairing();
 		}
-		ui::show_matter(app::commissioned());
+		ui::show_matter(net::commissioned());
 	}
 
 	/** Ask before dropping every network the device is on.

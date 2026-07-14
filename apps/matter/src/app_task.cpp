@@ -14,6 +14,7 @@
 #include "lib/core/CHIPError.h"
 
 #include "app.hpp"
+#include "net.hpp"
 
 #include <app-common/zap-generated/attributes/Accessors.h>
 #include <app/clusters/air-quality-server/air-quality-server.h>
@@ -153,7 +154,7 @@ void PublishBattery(const battery::State &bat)
 	 * *removed* -- CHIP only signals kCommissioningComplete. The table is the truth, and this runs
 	 * on every wake of the loop, so the flag is fresh by the time the menu opens (the loop calls
 	 * this hook before it acts on the button). */
-	::app::set_commissioned(Server::GetInstance().GetFabricTable().FabricCount() > 0);
+	::net::set_commissioned(Server::GetInstance().GetFabricTable().FabricCount() > 0);
 	PlatformMgr().UnlockChipStack();
 }
 
@@ -163,12 +164,12 @@ void MatterEventHandler(const ChipDeviceEvent *event, intptr_t)
 {
 	switch (event->Type) {
 	case DeviceEventType::kCHIPoBLEAdvertisingChange:
-		::app::set_link(event->CHIPoBLEAdvertisingChange.Result == kActivity_Started
+		::net::set_link(event->CHIPoBLEAdvertisingChange.Result == kActivity_Started
 				      ? ui::Link::BleAdv
 				      : ui::Link::None);
 		break;
 	case DeviceEventType::kThreadConnectivityChange:
-		::app::set_link(event->ThreadConnectivityChange.Result == kConnectivity_Established
+		::net::set_link(event->ThreadConnectivityChange.Result == kConnectivity_Established
 				      ? ui::Link::ThreadConnected
 				      : ui::Link::ThreadJoining);
 		break;
@@ -177,7 +178,7 @@ void MatterEventHandler(const ChipDeviceEvent *event, intptr_t)
 	}
 }
 
-/* The onboarding codes, fetched once from CHIP. Static because app::set_pairing_codes() does not
+/* The onboarding codes, fetched once from CHIP. Static because net::set_pairing_codes() does not
  * copy them and the UI holds the pointers for the life of the device. */
 char sQrCode[chip::QRCodeBasicSetupPayloadGenerator::kMaxQRCodeBase38RepresentationLength + 1];
 char sManualCode[chip::kManualSetupLongCodeCharLength + 1];
@@ -216,7 +217,7 @@ void FetchOnboardingCodes()
 		return;
 	}
 
-	::app::set_pairing_codes(sQrCode, GroupManualCode(sManualCode));
+	::net::set_pairing_codes(sQrCode, GroupManualCode(sManualCode));
 }
 
 /* How long the radio listens after the user asks for the code. Ten minutes is what it takes to
@@ -308,7 +309,7 @@ void FactoryReset()
  *
  * The SDK's server is a closed singleton: it holds the value, persists it, and reports it, and hands
  * the application neither a delegate nor a callback. So the traffic goes both ways by hand -- pushed
- * out here, polled back in by the loop (see ::app::Hooks::unit_from_network). */
+ * out here, polled back in by the loop (see ::net::Hooks::unit_from_network). */
 ui::TempUnit FromMatter(UnitLocalization::TempUnitEnum u)
 {
 	return u == UnitLocalization::TempUnitEnum::kFahrenheit ? ui::TempUnit::Fahrenheit
@@ -356,7 +357,7 @@ bool LinkRssi(int8_t *out)
 
 void AirInkThread(void *, void *, void *)
 {
-	const ::app::Hooks hooks = {
+	const ::net::Hooks hooks = {
 		.reading = PublishReading,
 		.battery = PublishBattery,
 		.factory_reset = FactoryReset,
@@ -366,7 +367,7 @@ void AirInkThread(void *, void *, void *)
 		.unit_from_network = UnitFromNetwork,
 		.link_rssi = LinkRssi,
 	};
-	::app::set_hooks(hooks);
+	::net::set_hooks(hooks);
 	::app::set_build_name("Matter over Thread");
 	::app::run(); /* never returns */
 }
@@ -411,7 +412,7 @@ CHIP_ERROR AppTask::StartApp()
 	 * there are any is what decides that the menu has a Matter row at all. The fabric table has
 	 * been loaded from NVS by now, so this is the state a reboot comes back to. */
 	FetchOnboardingCodes();
-	::app::set_commissioned(Server::GetInstance().GetFabricTable().FabricCount() > 0);
+	::net::set_commissioned(Server::GetInstance().GetFabricTable().FabricCount() > 0);
 
 	k_thread_create(&sAirInkThread, sAirInkStack, K_THREAD_STACK_SIZEOF(sAirInkStack), AirInkThread,
 			nullptr, nullptr, nullptr, K_PRIO_PREEMPT(10), 0, K_NO_WAIT);

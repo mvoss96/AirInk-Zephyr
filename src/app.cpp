@@ -7,8 +7,11 @@
 
 #include "input/button.hpp"
 #include "menu.hpp"
+#include "net.hpp"
 #include "prefs.hpp"
-#include "ui/quantize.hpp"
+#include "sensors/battery.hpp"
+#include "sensors/scd41.hpp"
+#include "ui/display_ui.hpp"
 #include "version.hpp"
 
 static constexpr int TICK_MS = 30000;			// How often a measurement cycle runs
@@ -16,69 +19,16 @@ static constexpr uint32_t CO2_EVERY_TICKS = 10; // Every tenth cycle is a full C
 static uint32_t tick_count;						// cycles since boot, or since the last recalibration
 static uint16_t last_co2_ppm;					// held on screen between the five-minute CO2 reads
 
-/* What was last sent to the network, quantized to what a person could tell apart. See measure(). */
-static int32_t pub_temp_x100;
-static uint16_t pub_hum_x100;
-static bool have_published;
-
-static app::Hooks hooks;
-
-// Not copied: they are string literals or static buffers owned by the caller (see app.hpp).
+// Not copied: a string literal, or the caller's static buffer (see app.hpp).
 static const char *build_name = "Standalone";
-static const char *pair_qr;
-static const char *pair_manual;
 
 /* The last temperature the sensor gave us, for the offset editor's prediction. INT32_MIN and not 0,
  * because 0.00 C is a temperature. */
 static int32_t last_temp = INT32_MIN;
 
-// Written by any thread, read by the loop. A plain enum store is atomic on this core, and
-// a stale read costs nothing worse than one cycle of a stale indicator.
-static ui::Link link_state = ui::Link::None;
-static bool is_commissioned;
-
-void app::set_hooks(const Hooks &h)
-{
-	hooks = h;
-}
-
 void app::set_build_name(const char *name)
 {
 	build_name = name;
-}
-
-void app::set_pairing_codes(const char *qr, const char *manual)
-{
-	pair_qr = qr;
-	pair_manual = manual;
-}
-
-void app::set_commissioned(bool on_fabric)
-{
-	is_commissioned = on_fabric;
-}
-
-bool app::commissioned()
-{
-	return is_commissioned;
-}
-
-void app::open_pairing()
-{
-	if (hooks.pairing_open)
-	{
-		hooks.pairing_open();
-	}
-}
-
-bool app::has_radio()
-{
-	return pair_qr != nullptr;
-}
-
-bool app::can_factory_reset()
-{
-	return hooks.factory_reset != nullptr;
 }
 
 int32_t app::last_temp_x100()
@@ -89,19 +39,6 @@ int32_t app::last_temp_x100()
 void app::forget_last_temp()
 {
 	last_temp = INT32_MIN;
-}
-
-void app::publish_unit(ui::TempUnit u)
-{
-	if (hooks.publish_unit)
-	{
-		hooks.publish_unit(u);
-	}
-}
-
-void app::set_link(ui::Link state)
-{
-	link_state = state;
 }
 
 /** Read the SCD41 and put the numbers on screen.
@@ -146,36 +83,10 @@ static void measure()
 	ui::show_sensor();
 	ui::set_sensor(r.co2_ppm, r.temp_x100, r.hum_x100);
 
-	/* When to tell the network. Not every tick, and not only every tenth.
-	 *
-	 * Every tenth (with the CO2 read) left a controller up to five minutes behind the panel, which is
-	 * a long time to disagree with the thing on the wall. Every tick fixed that and was MEASURED to
-	 * cost 16.2 mAs per cycle -- +54 uA, 112 days down to 98. Fourteen days for freshness nobody had
-	 * asked for.
-	 *
-	 * So: when the reading actually moves. The panel already decides that -- it deduplicates on what
-	 * it can show -- and a still room moves a tenth of a degree once or twice in five minutes, not ten
-	 * times. The controller now agrees with the panel, and the radio only speaks when there is
-	 * something to say.
-	 *
-	 * The threshold is in Celsius and whole percent, NOT in the unit on the panel: what the network is
-	 * told must not depend on whether somebody set the display to Fahrenheit.
-	 *
-	 * A CO2 read always goes, because it is the one number that is genuinely new on that tick -- and
-	 * the value sent is always the full-resolution one. The quantization decides WHEN to speak, never
-	 * WHAT to say.
-	 */
-	const int32_t t_q = ui::quantize_temp_x100(r.temp_x100);
-	const uint16_t h_q = ui::quantize_hum_x100(r.hum_x100);
-	const bool moved = !have_published || t_q != pub_temp_x100 || h_q != pub_hum_x100;
-
-	if (hooks.reading && (full_co2 || moved))
-	{
-		hooks.reading(r);
-		pub_temp_x100 = t_q;
-		pub_hum_x100 = h_q;
-		have_published = true;
-	}
+	// The network hears about it when there is something to say -- which is net's judgement, not
+	// ours (see net::publish_reading): a fresh CO2 number always goes, a temperature goes when it
+	// moved by more than the panel could show.
+	net::publish_reading(r, full_co2);
 
 	tick_count++;
 }
@@ -235,12 +146,9 @@ static battery::State poll_battery()
 {
 	const battery::State bat = battery::read();
 	ui::set_battery(bat.pct, bat.charging);
-	ui::set_link(link_state);
+	ui::set_link(net::link()); // the radio's threads wrote it; the loop puts it on the panel
 
-	if (hooks.battery)
-	{
-		hooks.battery(bat);
-	}
+	net::publish_battery(bat);
 	return bat;
 }
 
@@ -266,7 +174,7 @@ static battery::State poll_battery()
  */
 static void onboarding()
 {
-	if (!pair_qr || is_commissioned)
+	if (!net::has_radio() || net::commissioned())
 	{
 		return;
 	}
@@ -276,9 +184,9 @@ static void onboarding()
 
 	while (true)
 	{
-		poll_battery(); // also refreshes is_commissioned, which is the way out below
+		poll_battery(); // also refreshes net::commissioned(), which is the way out below
 
-		if (is_commissioned)
+		if (net::commissioned())
 		{
 			printk("[MTR] commissioned; on to the readings\n");
 			return;
@@ -289,78 +197,9 @@ static void onboarding()
 		if (wait(k_uptime_get() + TICK_MS) != button::Event::None)
 		{
 			printk("[MTR] onboarding code dismissed\n");
-			if (hooks.pairing_dismissed)
-			{
-				hooks.pairing_dismissed();
-			}
+			net::dismiss_pairing();
 			return;
 		}
-	}
-}
-
-/** Adopt a temperature unit the controller set, if it did.
- *
- * The other half of the menu's toggle. A user with the phone in their hand may well change the unit
- * from Home Assistant rather than walk to the device, and the panel has to agree with what the app
- * shows -- a thermometer that disagrees with its own record is worse than one with no app at all.
- *
- * It is a poll and not a callback because the cluster gives us nothing to hang a callback on; see
- * Hooks::unit_from_network. Once a tick is not a compromise here: the e-paper cannot show it sooner.
- *
- * What comes in goes into prefs, which repaints the panel and writes it down -- so the device boots on
- * the last thing anyone chose, whoever chose it and wherever. adopt() and not set(), because the one
- * thing that must NOT happen is telling the network what the network has just told us.
- */
-static void pull_unit()
-{
-	if (!hooks.unit_from_network)
-	{
-		return; // no network, no second opinion
-	}
-
-	// Compared against the STORE and not against the panel: prefs is where the unit lives, and the
-	// panel is one of the places it is shown. (They cannot disagree -- prefs paints it -- but comparing
-	// against the mirror to decide whether to write the original is the kind of thing that stays true
-	// only by luck.) A value that has not moved would be dropped by prefs anyway; the point of the
-	// guard is the log line below, which would otherwise appear every half minute for ever.
-	ui::TempUnit u;
-	if (!hooks.unit_from_network(&u) || (int32_t)u == prefs::get(prefs::Unit))
-	{
-		return;
-	}
-
-	printk("[PREFS] temp unit %s (from the network)\n", u == ui::TempUnit::Fahrenheit ? "F" : "C");
-	prefs::adopt(prefs::Unit, (int32_t)u);
-}
-
-/** Ask the radio how well it is heard, for the bars in the status bar.
- *
- * Nothing announces a signal strength -- it drifts -- so it is asked for, once a tick. On a build with
- * no radio, or before the device has a parent to be a child of, there is nothing to ask and the status
- * bar keeps the token it already has.
- */
-static void pull_signal()
-{
-	if (!hooks.link_rssi)
-	{
-		return;
-	}
-
-	int8_t rssi;
-	if (!hooks.link_rssi(&rssi))
-	{
-		return;
-	}
-
-	// Log only when the bars actually move. The dBm behind them drifts a little every half minute and
-	// saying so every time would drown the log in noise -- but the moment the panel changes is worth
-	// a line, because that is the line you read when you are deciding where to put the device.
-	const int before = ui::signal_bars();
-	ui::set_signal(rssi);
-	const int after = ui::signal_bars();
-	if (after != before)
-	{
-		printk("[SIG] %d dBm -> %d bars\n", rssi, after);
 	}
 }
 
@@ -376,8 +215,7 @@ static void app_loop()
 	{
 		const int64_t now = k_uptime_get();
 		const battery::State bat = poll_battery();
-		pull_unit();
-		pull_signal();
+		net::poll(); // what the network has to say back: the unit, the signal strength
 
 		if (bat.low)
 		{
@@ -404,12 +242,12 @@ static void app_loop()
 					// The retained CO2 value predates the correction, so the next read must be a full
 					tick_count = 0;
 				}
-				else if (status == menu::Status::FactoryReset && hooks.factory_reset)
+				else if (status == menu::Status::FactoryReset && net::can_factory_reset())
 				{
-					// Leaves the screen as it is: the hook reboots us, and a device that is
+					// Leaves the screen as it is: the reset reboots us, and a device that is
 					// about to lose its network should not spend its last second drawing.
 					printk("[UI] factory reset\n");
-					hooks.factory_reset();
+					net::factory_reset();
 				}
 				else
 				{
@@ -455,13 +293,12 @@ static void app_loop()
 
 void app::run()
 {
-	// What the panel needs. What the MENU offers is decided elsewhere -- it asks has_radio() and
-	// can_factory_reset() -- because a row exists when there is something behind it, and only the app
-	// knows what it was handed.
+	// What the panel needs. What the MENU offers is decided elsewhere -- it asks net::has_radio()
+	// and net::can_factory_reset() -- because a row exists when there is something behind it.
 	const ui::Config ui_cfg = {
 		.build = build_name,
-		.pair_qr = pair_qr,
-		.pair_manual = pair_manual,
+		.pair_qr = net::pair_qr(),
+		.pair_manual = net::pair_manual(),
 	};
 	// Before the panel, because ui::init() builds the sensor view and the menu with a unit already in
 	// them. A store that will not come up is survivable: prefs answers Celsius and says so in the log.

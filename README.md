@@ -73,7 +73,7 @@ neither may sit on the event loop while OpenThread waits to poll its parent.
 The coupling is one-way and deliberately thin. `app.cpp` knows nothing about Matter: it calls two
 optional function pointers (`app::Hooks`) after each cycle, which the Matter application installs
 and the standalone one leaves null. In the other direction, Matter never touches the UI — LVGL is
-not thread-safe — so it drops the radio state with `app::set_link()` and the loop picks it up on its
+not thread-safe — so it drops the radio state with `net::set_link()` and the loop picks it up on its
 next pass.
 
 The one exception is `#ifndef CONFIG_CHIP` in `app.cpp`, guarding the console power-down: the

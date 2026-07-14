@@ -16,7 +16,7 @@
  * neither may sit on the CHIP event loop while OpenThread waits to poll its parent.
  *
  * Direction of travel: AirInk measures, and hands each reading to Matter. Matter never reaches
- * back into the UI -- the network state is left where the loop picks it up (app::set_link()).
+ * back into the UI -- the network state is left where the loop picks it up (net::set_link()).
  */
 class AppTask {
 public:

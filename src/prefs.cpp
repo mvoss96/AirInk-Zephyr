@@ -7,7 +7,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "app.hpp" // app::publish_unit -- the one setting the network keeps a copy of
+#include "net.hpp" // net::publish_unit -- the one setting the network keeps a copy of
 
 namespace
 {
@@ -26,7 +26,7 @@ namespace
 		ui::set_temp_unit(unit);
 		if (local)
 		{
-			app::publish_unit(unit); // no-op in a build with no network
+			net::publish_unit(unit); // no-op in a build with no network
 		}
 	}
 

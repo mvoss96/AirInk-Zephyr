@@ -35,7 +35,7 @@ sit on the CHIP event loop while OpenThread waits to poll its parent.
 
 Direction of travel is one-way: AirInk measures and hands each reading to Matter (the hooks in
 `app::Hooks`, which take the CHIP stack lock). Matter never reaches back into the UI -- LVGL is
-not thread-safe, so the network state is left in a variable (`app::set_link()`) that the loop
+not thread-safe, so the network state is left in a variable (`net::set_link()`) that the loop
 picks up on its next cycle.
 
 **`CONFIG_DK_LIBRARY=n`.** The DK library drives a development kit's buttons and LEDs; we have
