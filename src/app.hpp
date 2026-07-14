@@ -147,6 +147,26 @@ namespace app
 	 */
 	void publish_unit(ui::TempUnit u);
 
+	/** What this device can actually do. The menu asks before it offers: a row exists because there
+	 * is something behind it, not because of a compile switch -- and a cursor must not stop on a row
+	 * that is not drawn, or a tap would appear to do nothing.
+	 *
+	 * Both answer from what run()'s caller handed over, so they are only meaningful after set_hooks()
+	 * and the pairing codes -- which is to say, from inside the loop, which is where the menu lives.
+	 */
+	bool has_radio();
+	bool can_factory_reset();
+
+	/** The last temperature the sensor gave us, in hundredths of a degree Celsius.
+	 *
+	 * For the temperature-offset editor, which predicts what the panel will read once the offset the
+	 * user is turning takes effect -- so they can tap until it agrees with the thermometer in their
+	 * hand instead of doing the arithmetic themselves.
+	 *
+	 * @return the reading, or INT32_MIN if the sensor has not answered yet
+	 */
+	int32_t last_temp_x100();
+
 	/** Report the radio state for the status bar, from any thread.
 	 *
 	 * Only records the value -- the panel belongs to run()'s thread, which puts it up on

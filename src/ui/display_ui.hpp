@@ -37,25 +37,10 @@ namespace ui
 		ThreadConnected
 	};
 
-	/** Settings-menu entries, in the order they are drawn.
-	 *
-	 * Not every entry exists in every build, and what exists is decided by what init() was given,
-	 * not by a compile switch: Matter needs onboarding codes to show, FactoryReset needs something
-	 * to reset. A build with no radio has neither. Ask menu_has() before offering one -- an entry
-	 * that is absent is not drawn and must not be reachable with the cursor either.
-	 *
-	 * Units belong here too, but they need a persistent store that does not exist yet. A
-	 * calibration lives inside the sensor, so it needs none.
-	 */
-	enum class Menu : uint8_t
-	{
-		Calibrate,
-		Units,
-		Matter,
-		FactoryReset,
-		Exit,
-		Count
-	};
+	/** How many entries a menu may have. The panel decides this, not the menu: five 44 px rows are
+	 * what fits above the hint line, and show_list() refuses anything longer rather than drawing over
+	 * it. See the static_assert in display_ui.cpp. */
+	constexpr int LIST_MAX_ROWS = 5;
 
 	/** The unit the panel shows temperature in.
 	 *
@@ -101,9 +86,6 @@ namespace ui
 	 * @retval -1  no display; every other function here becomes a no-op
 	 */
 	int init(const Config &cfg = {});
-
-	/** Whether a menu entry exists in this build. See Menu. */
-	bool menu_has(Menu entry);
 
 	/** Select the Matter view.
 	 *
@@ -210,11 +192,41 @@ namespace ui
 	 */
 	void set_low_battery();
 
-	/** Select the settings menu and stage the highlighted entry.
+	/** Select the menu view and stage its rows, with the cursor on one of them.
 	 *
-	 * @param selected the entry to draw in reverse video
+	 * There is ONE menu view, and it draws whatever list it is handed. It has no idea that a root
+	 * menu and a Calibrate sub-menu exist -- to the panel they are five strings and a cursor, twice,
+	 * and a second set of widgets for the second one would be a second copy of the first for no
+	 * reason. (There was one, briefly. It cost 1.7 KB of an LVGL pool that has 5 KB left, and it made
+	 * stepping into the sub-menu look like a view change, which on e-paper means a black flash.)
+	 *
+	 * Whose rows these are, and where the cursor was left in each, is menu.cpp's business.
+	 *
+	 * The whole list every time, labels and all -- a row that carries a value ("Altitude: 300 m") has
+	 * no other way to change. Nothing is redrawn that has not moved: an unchanged label and an
+	 * unchanged cursor leave the panel alone.
+	 *
+	 * @param labels   `count` strings, top to bottom; they need not outlive the call
+	 * @param count    how many rows, 1..LIST_MAX_ROWS (more is a programming error and is ignored)
+	 * @param selected the row drawn in reverse video, 0..count-1
 	 */
-	void set_menu(Menu selected);
+	void show_list(const char *const *labels, int count, int selected);
+
+	/** Select the one-button number editor: a title, the value being turned, and what a tap does.
+	 *
+	 * One button cannot really enter a number, so it does not pretend to: a tap steps the value and
+	 * wraps at the end, and a hold keeps it. What makes that bearable is the second line -- for the
+	 * temperature offset it carries the reading as it stands right now, so the user turns the value
+	 * until the panel agrees with the thermometer in their hand, and never has to do arithmetic.
+	 *
+	 * @param title the setting, e.g. "TEMP OFFSET"
+	 * @param value the number as it should be read, e.g. "4.0"
+	 * @param unit  what it is measured in, e.g. "\xC2\xB0" "C" or "m"
+	 * @param sub   the line under it; NULL for none
+	 * @param hint  what the buttons do, e.g. "Tap = +0.5     Hold = save"
+	 */
+	void set_value_edit(const char *title, const char *value, const char *unit, const char *sub,
+						const char *hint);
 
 	/** Select the calibration view: explain the one prerequisite, offer the way out.
 	 *

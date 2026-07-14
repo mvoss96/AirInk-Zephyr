@@ -189,47 +189,66 @@ int main(int argc, char **argv)
 	ui::refresh();
 	snapshot("lowbat");
 
-	// The menu, one snapshot per row the cursor can stop on -- which is where the two builds
-	// visibly differ: no radio, no Matter row, and nothing to reset.
+	// The menu. It is now a list of strings with a cursor -- the display does not know what the
+	// entries mean, so the sim says them out loud, exactly as menu.cpp's tables would.
 	g_tick_ms += 100;
 	ui::set_battery(87, false);
-	ui::set_menu(ui::Menu::Calibrate);
-	ui::refresh();
-	snapshot("menu");
 
-	// The Units row states the unit in force, so it has two looks and both are worth seeing: it is
-	// the only place the setting is visible, and a hold rewrites the row under the cursor.
-	g_tick_ms += 100;
-	ui::set_menu(ui::Menu::Units);
-	ui::refresh();
-	snapshot("menu_units_c");
+	const char *root_matter[] = {"Calibrate", "Units: °" "C", "Matter", "Factory reset", "Exit"};
+	const char *root_plain[] = {"Calibrate", "Units: °" "C", "Exit"};
+	const char *const *root = matter ? root_matter : root_plain;
+	const int root_n = matter ? 5 : 3;
 
-	g_tick_ms += 100;
-	ui::set_temp_unit(ui::TempUnit::Fahrenheit); // what the hold does
-	ui::refresh();
-	snapshot("menu_units_f");
-
-	g_tick_ms += 100;
-	ui::set_temp_unit(ui::TempUnit::Celsius);
-	ui::refresh();
-
-	if (matter)
+	for (int i = 0; i < root_n; i++)
 	{
 		g_tick_ms += 100;
-		ui::set_menu(ui::Menu::Matter); // one tap moves the cursor
+		ui::show_list(root, root_n, i);
 		ui::refresh();
-		snapshot("menu_matter");
-
-		g_tick_ms += 100;
-		ui::set_menu(ui::Menu::FactoryReset);
-		ui::refresh();
-		snapshot("menu_factory_reset");
+		char nm[24];
+		std::snprintf(nm, sizeof(nm), "menu_%d", i);
+		snapshot(nm);
 	}
 
+	// The Units row carries the unit in force -- the only place the setting is visible at all.
 	g_tick_ms += 100;
-	ui::set_menu(ui::Menu::Exit);
+	const char *root_f[] = {"Calibrate", "Units: °" "F", "Matter", "Factory reset", "Exit"};
+	ui::set_temp_unit(ui::TempUnit::Fahrenheit);
+	ui::show_list(root_f, root_n, 1);
 	ui::refresh();
-	snapshot("menu_exit");
+	snapshot("menu_units_f");
+	g_tick_ms += 100;
+	ui::set_temp_unit(ui::TempUnit::Celsius);
+
+	// The Calibrate sub-menu: the same list widget, a second time, for nothing.
+	const char *cal[] = {"Recalibrate CO2", "Temp offset: 6.5 °" "C", "Altitude: 300 m",
+						 "Auto-calib: Off", "Back"};
+	for (int i = 0; i < 5; i++)
+	{
+		g_tick_ms += 100;
+		ui::show_list(cal, 5, i);
+		ui::refresh();
+		char nm[24];
+		std::snprintf(nm, sizeof(nm), "calmenu_%d", i);
+		snapshot(nm);
+	}
+
+	// The one editor, behind any row that carries a number.
+	g_tick_ms += 100;
+	ui::set_value_edit("TEMP OFFSET", "4.0", "°" "C", "Will read 23.5 °" "C",
+					   "Tap = +0.5     Hold = save");
+	ui::refresh();
+	snapshot("edit_offset");
+
+	g_tick_ms += 100;
+	ui::set_value_edit("TEMP OFFSET", "6.5", "°" "C", "Will read 21.0 °" "C",
+					   "Tap = +0.5     Hold = save");
+	ui::refresh();
+	snapshot("edit_offset_turned");
+
+	g_tick_ms += 100;
+	ui::set_value_edit("ALTITUDE", "300", "m", "Above sea level", "Tap = +100     Hold = save");
+	ui::refresh();
+	snapshot("edit_altitude");
 
 	if (matter)
 	{

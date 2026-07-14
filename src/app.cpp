@@ -22,6 +22,10 @@ static const char *build_name = "Standalone";
 static const char *pair_qr;
 static const char *pair_manual;
 
+/* The last temperature the sensor gave us, for the offset editor's prediction. INT32_MIN and not 0,
+ * because 0.00 C is a temperature. */
+static int32_t last_temp = INT32_MIN;
+
 // Written by any thread, read by the loop. A plain enum store is atomic on this core, and
 // a stale read costs nothing worse than one cycle of a stale indicator.
 static ui::Link link_state = ui::Link::None;
@@ -59,6 +63,21 @@ void app::open_pairing()
 	{
 		hooks.pairing_open();
 	}
+}
+
+bool app::has_radio()
+{
+	return pair_qr != nullptr;
+}
+
+bool app::can_factory_reset()
+{
+	return hooks.factory_reset != nullptr;
+}
+
+int32_t app::last_temp_x100()
+{
+	return last_temp;
 }
 
 void app::publish_unit(ui::TempUnit u)
@@ -108,6 +127,8 @@ static void measure()
 		   full_co2 ? "[CO2]" : "[RHT]", r.co2_ppm,
 		   r.temp_x100 / 100, abs(r.temp_x100 % 100),
 		   r.hum_x100 / 100, r.hum_x100 % 100);
+
+	last_temp = r.temp_x100; // the offset editor predicts against this
 
 	ui::show_sensor();
 	ui::set_sensor(r.co2_ppm, r.temp_x100, r.hum_x100);
@@ -430,6 +451,13 @@ void app::run()
 		ui::refresh();
 		k_sleep(K_FOREVER); // leave the error on screen
 	}
+
+	// What the user told the sensor about where it is standing -- the temperature offset, the
+	// altitude, whether it may trim itself. It lives in our NVS and not in the sensor's EEPROM (see
+	// scd41::set_trim), so it has to be handed back every boot. Survivable if it fails: the sensor
+	// keeps measuring, just with the factory's idea of the room instead of the user's.
+	scd41::set_trim(prefs::trim());
+
 	if (battery::init() < 0)
 	{
 		printk("Battery ADC not ready (continuing without it)\n");

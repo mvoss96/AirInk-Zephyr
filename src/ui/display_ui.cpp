@@ -58,7 +58,7 @@ namespace
 	constexpr int MENU_HINT_H = 26; // "Tap = next   Hold = select"
 	constexpr int MENU_ITEM_H = 44;
 
-	static_assert((int)ui::Menu::Count * MENU_ITEM_H + MENU_HINT_H <= CONTENT_H,
+	static_assert(ui::LIST_MAX_ROWS * MENU_ITEM_H + MENU_HINT_H <= CONTENT_H,
 				  "the menu entries no longer fit above the hint -- shrink MENU_ITEM_H, or the "
 				  "panel will draw them on top of each other");
 
@@ -253,14 +253,16 @@ namespace
 	lv_obj_t *error_root, *err_title_lbl, *err_detail_lbl;
 	lv_obj_t *lowbat_root, *lowbat_fill, *lowbat_pct_lbl;
 	lv_obj_t *reset_root;
-	lv_obj_t *menu_root, *menu_cursor;
-	lv_obj_t *menu_item[(int)ui::Menu::Count];
+	/* THE menu. One set of widgets, and it draws whatever list it is handed -- it does not know that a
+	 * root and a Calibrate sub-menu exist, because to a panel they are five strings and a cursor,
+	 * twice. */
+	lv_obj_t *list_root, *list_cursor;
+	lv_obj_t *list_item[ui::LIST_MAX_ROWS];
+	int list_rows = 0; // how many are in use right now; the rest are hidden
+	int list_sel = -1; // -1 = nothing drawn yet
 
-	/* Which menu entries this build has, and where each one sits. A build with no radio has
-	 * nothing to pair over, so it gets no Pairing entry -- and the entries below it move up,
-	 * which is why the row is looked up rather than computed from the enum. -1 = absent. */
-	int menu_row[(int)ui::Menu::Count];
-	int menu_rows;
+	/* The one-button number editor, behind any row that carries a number. */
+	lv_obj_t *value_root, *value_title, *value_num, *value_unit, *value_sub, *value_hint;
 
 	/* The pairing view. The QR canvas is an I1 (1-bit indexed) draw buffer that lv_qrcode
 	 * allocates from the LVGL pool when we hand it the payload -- so a build without codes
@@ -285,6 +287,7 @@ namespace
 		VIEW_LOWBAT,
 		VIEW_RESET,
 		VIEW_MENU,
+		VIEW_VALUE,
 		VIEW_PAIRING,
 		VIEW_CALIB_PROMPT,
 		VIEW_CALIB_PROGRESS,
@@ -310,17 +313,6 @@ namespace
 											   "C";
 	}
 
-	/** The Units menu row. It states the unit in force rather than the one a hold would switch to:
-	 * every other row names what it does, but this one is the only place the setting is visible at
-	 * all, and a row that reads "Units: °F" while the panel says °C is a lie however you argue it. */
-	const char *units_row_text(ui::TempUnit u)
-	{
-		return u == ui::TempUnit::Fahrenheit ? "Units: \xC2\xB0"
-											   "F"
-											 : "Units: \xC2\xB0"
-											   "C";
-	}
-
 	/* Skip-refresh dedup. The last_* sentinels are int, not the API's uint8_t,
 	 * because they use -1 for "nothing shown yet".
 	 *
@@ -337,7 +329,6 @@ namespace
 	int last_batt_pct = -1;
 	int last_link = -1;
 	int last_lowbat_pct = -1;
-	int last_menu_sel = -1;
 	int last_calib_pct = -1;
 
 	// ---- pool accounting ----
@@ -465,20 +456,36 @@ namespace
 
 	/** Is this a view the user steps through with the button?
 	 *
-	 * A full refresh is a ~2 s black flash. Paying it on every cursor move makes the
-	 * device feel broken, so these views are entered and navigated with partial
-	 * refreshes. The ghosting they leave -- the inverted cursor bar and the big DSEG7
-	 * digits are the worst of it -- is cleared by the one full refresh that happens on
-	 * the way back out to a resting view.
+	 * A full refresh is a ~2 s black flash. Paying it on every step makes the device feel broken, so
+	 * these views are entered and navigated with partial refreshes. The ghosting they leave -- the
+	 * inverted cursor bar and the big DSEG7 digits are the worst of it -- is cleared by the one full
+	 * refresh that happens on the way back out to a resting view.
 	 *
-	 * @param v the view to classify
-	 * @return true for the menu, the calibration steps and the reset countdown
+	 * A table and not a chain of ORs, and the difference is not style. The old chain named the
+	 * transient views and said nothing about the rest, so a view added later was silently RESTING --
+	 * and the Calibrate sub-menu and the number editor were both added later, and both flashed the
+	 * panel black on the way in and on the way out. Nothing complained; the list was simply wrong and
+	 * had no way to say so. Now every view must be classified, and the static_assert below is what
+	 * says so, at build time, before anyone has to notice it with their eyes.
 	 */
-	bool transient(View v)
-	{
-		return v == VIEW_MENU || v == VIEW_PAIRING || v == VIEW_CALIB_PROMPT ||
-			   v == VIEW_CALIB_PROGRESS || v == VIEW_RESET;
-	}
+	const bool TRANSIENT[] = {
+		/* VIEW_NONE           */ false,
+		/* VIEW_BOOT           */ false, // resting: the splash sits there until the first reading
+		/* VIEW_SENSOR         */ false, // resting: the whole point of the device
+		/* VIEW_ERROR          */ false, // resting: it stays up until the fault clears
+		/* VIEW_LOWBAT         */ false, // resting: it stays up until the battery does not
+		/* VIEW_RESET          */ true,	 // a prompt, one button away from gone
+		/* VIEW_MENU           */ true,	 // stepped through -- and it is every menu, root or not
+		/* VIEW_VALUE          */ true,	 // stepped through, one tap per step
+		/* VIEW_PAIRING        */ true,	 // read and dismissed
+		/* VIEW_CALIB_PROMPT   */ true,	 // a prompt
+		/* VIEW_CALIB_PROGRESS */ true,	 // a bar that redraws every five seconds for three minutes
+	};
+	static_assert(sizeof(TRANSIENT) / sizeof(TRANSIENT[0]) == (size_t)VIEW_COUNT,
+				  "a new view must say whether the user steps through it -- get this wrong and the "
+				  "panel flashes black on every step, or ghosts forever");
+
+	bool transient(View v) { return TRANSIENT[v]; }
 
 	/** The container that belongs to a view.
 	 *
@@ -493,7 +500,8 @@ namespace
 		case VIEW_ERROR:  return error_root;
 		case VIEW_LOWBAT: return lowbat_root;
 		case VIEW_RESET:  return reset_root;
-		case VIEW_MENU:   return menu_root;
+		case VIEW_MENU:   return list_root;
+		case VIEW_VALUE:  return value_root;
 		case VIEW_PAIRING: return pair_root;
 		case VIEW_CALIB_PROMPT:
 		case VIEW_CALIB_PROGRESS: return calib_root;
@@ -817,60 +825,70 @@ namespace
 		lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -10);
 	}
 
-	/** Build the settings menu: one label per entry, a moving cursor, and the hint under them.
+	/** Build the menu: LIST_MAX_ROWS labels, a cursor, and the hint under them.
 	 *
-	 * Only the entries this build has: Pairing is skipped when there are no onboarding codes,
-	 * and the entries below it move up. menu_row[] records where each one landed, so the
-	 * cursor and the highlight bar agree with what is drawn.
+	 * The full complement of rows whether a given list uses them or not -- they are labels, they cost
+	 * a few hundred bytes of pool between them, and the alternative is a widget tree that has to be
+	 * torn down and rebuilt every time a list with fewer rows comes up. show_list() hides the ones it
+	 * does not need and centres the rest.
 	 *
-	 * @param scr           the active screen
-	 * @param with_matter   whether the Matter entry exists
-	 * @param with_reset    whether the Factory reset entry exists
+	 * The cursor is created before the labels so they draw on top of it: a selected entry is white
+	 * text on the black bar, which is the only way to mark a selection without a glyph B612's ASCII
+	 * subset does not have.
 	 */
-	void build_menu(lv_obj_t *scr, bool with_matter, bool with_reset)
+	void build_list(lv_obj_t *scr)
 	{
-		menu_root = make_view(scr);
+		static_assert(ui::LIST_MAX_ROWS * MENU_ITEM_H + MENU_HINT_H <= CONTENT_H,
+					  "the menu entries no longer fit above the hint -- shrink MENU_ITEM_H, or the "
+					  "panel will draw them on top of each other");
 
-		// Units is the one row whose label is not fixed: it carries the current unit, and
-		// set_temp_unit() rewrites it. The placeholder here is replaced below.
-		const char *const names[] = {"Calibrate CO2", units_row_text(temp_unit), "Matter",
-									 "Factory reset", "Exit"};
-		static_assert(sizeof(names) / sizeof(names[0]) == (size_t)ui::Menu::Count,
-					  "every menu entry needs a label");
+		list_root = make_view(scr);
+		list_cursor = make_divider(list_root, CONTENT_W - 32, MENU_ITEM_H);
 
-		const bool present[] = {true, true, with_matter, with_reset, true};
-		static_assert(sizeof(present) / sizeof(present[0]) == (size_t)ui::Menu::Count,
-					  "every menu entry needs to say whether it exists");
-
-		menu_rows = 0;
-		for (int i = 0; i < (int)ui::Menu::Count; i++)
+		for (int i = 0; i < ui::LIST_MAX_ROWS; i++)
 		{
-			menu_row[i] = present[i] ? menu_rows++ : -1;
+			list_item[i] = make_label(list_root, &b612_28, CONTENT_W - 32);
+			lv_label_set_text(list_item[i], "");
 		}
 
-		// The cursor is created before the labels so they draw on top of it: a
-		// selected entry is white text on the black bar, which is the only way to
-		// mark a selection without a glyph B612's ASCII subset does not have.
-		menu_cursor = make_divider(menu_root, CONTENT_W - 32, MENU_ITEM_H);
-		lv_obj_set_pos(menu_cursor, 16, menu_top(menu_rows));
-
-		for (int i = 0; i < (int)ui::Menu::Count; i++)
-		{
-			if (menu_row[i] < 0)
-			{
-				menu_item[i] = nullptr;
-				continue;
-			}
-			menu_item[i] = make_label(menu_root, &b612_28, CONTENT_W - 32);
-			lv_label_set_text(menu_item[i], names[i]);
-			// Centre the 28 px line in its row, so the highlight bar sits square around it.
-			lv_obj_set_pos(menu_item[i], 16,
-						   menu_top(menu_rows) + menu_row[i] * MENU_ITEM_H + (MENU_ITEM_H - 28) / 2);
-		}
-
-		lv_obj_t *hint = make_label(menu_root, &b612_14, CONTENT_W);
+		lv_obj_t *hint = make_label(list_root, &b612_14, CONTENT_W);
 		lv_label_set_text(hint, "Tap = next     Hold = select");
 		lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -8);
+	}
+
+	/** Build the one-button number editor.
+	 *
+	 * A title, the number in the same big 7-segment face the readings use, its unit beside it, and
+	 * two lines under it: what the number means right now, and what the button does. The value and
+	 * the reading share a face on purpose -- it is the same quantity, and the point of the screen is
+	 * to make them agree. */
+	void build_value_edit(lv_obj_t *scr)
+	{
+		value_root = make_view(scr);
+
+		value_title = make_label(value_root, &b612_16, CONTENT_W);
+		lv_obj_align(value_title, LV_ALIGN_TOP_MID, 0, 14);
+
+		// Number + unit on one baseline, as in the sensor view.
+		lv_obj_t *row = lv_obj_create(value_root);
+		lv_obj_remove_style_all(row);
+		lv_obj_set_size(row, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+		lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+		lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+		lv_obj_set_flex_align(row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
+		lv_obj_set_style_pad_column(row, 6, 0);
+		lv_obj_align(row, LV_ALIGN_CENTER, 0, -18);
+
+		value_num = make_label(row, &dseg7_48, 0);
+		value_unit = make_label(row, &b612_28, 0);
+		lv_obj_set_style_translate_y(value_unit,
+									 (lv_coord_t)(b612_28.base_line - dseg7_48.base_line), 0);
+
+		value_sub = make_label(value_root, &b612_16, CONTENT_W);
+		lv_obj_align(value_sub, LV_ALIGN_CENTER, 0, 40);
+
+		value_hint = make_label(value_root, &b612_14, CONTENT_W);
+		lv_obj_align(value_hint, LV_ALIGN_BOTTOM_MID, 0, -8);
 	}
 
 	/** Build the pairing view: the onboarding QR, with the manual code under it.
@@ -1010,8 +1028,10 @@ int ui::init(const Config &cfg)
 	h = log_built("lowbat", h);
 	build_reset(scr);
 	h = log_built("reset", h);
-	build_menu(scr, cfg.pair_qr != nullptr, cfg.factory_reset);
+	build_list(scr);
 	h = log_built("menu", h);
+	build_value_edit(scr);
+	h = log_built("value edit", h);
 	build_calib(scr);
 	h = log_built("calib", h);
 	/* Only when there is something to pair over -- otherwise no view, and the QR's draw buffer
@@ -1027,11 +1047,6 @@ int ui::init(const Config &cfg)
 	// paints it with a full refresh.
 	ui::refresh();
 	return 0;
-}
-
-bool ui::menu_has(Menu entry)
-{
-	return ready && menu_row[(int)entry] >= 0;
 }
 
 void ui::show_matter(bool commissioned)
@@ -1122,10 +1137,10 @@ void ui::set_temp_unit(TempUnit u)
 	temp_unit = u;
 
 	lv_label_set_text(temp_unit_lbl, unit_token(u));
-	if (menu_item[(int)Menu::Units])
-	{
-		lv_label_set_text(menu_item[(int)Menu::Units], units_row_text(u));
-	}
+	// The Units menu row is NOT touched here. The menu owns its own labels now -- it hands the whole
+	// list to show_list() every time it draws -- so a setter that reached in to rewrite one of them
+	// would be writing behind its back, and would be the last thing left tying the display to what
+	// its entries mean.
 
 	// Repaint the number under the new unit from the reading we kept, so the switch is complete the
 	// moment it happens. Without this the panel would show, say, 24.3 with a F next to it until the
@@ -1319,36 +1334,71 @@ int ui::signal_bars()
 	return last_bars;
 }
 
-void ui::set_menu(Menu selected)
+void ui::show_list(const char *const *labels, int count, int selected)
+{
+	if (!ready || count < 1 || count > LIST_MAX_ROWS)
+	{
+		return; // a list that does not fit is a bug, and drawing it over the hint would hide the bug
+	}
+
+	pending_view = VIEW_MENU;
+
+	const int top = menu_top(count);
+
+	// Re-place the block only when the row count changed -- which happens when a different list comes
+	// up, and when a build has no Matter row.
+	if (count != list_rows)
+	{
+		for (int i = 0; i < LIST_MAX_ROWS; i++)
+		{
+			set_hidden(list_item[i], i >= count);
+			lv_obj_set_pos(list_item[i], 16, top + i * MENU_ITEM_H + (MENU_ITEM_H - 28) / 2);
+		}
+		lv_obj_set_x(list_cursor, 16);
+		list_rows = count;
+		list_sel = -1; // force the cursor and the colours below
+		dirty = true;
+	}
+
+	// The labels. lv_label already holds the last string, so it is also the record of what is on the
+	// panel: comparing against it is what keeps a menu that has not changed from costing a refresh.
+	for (int i = 0; i < count; i++)
+	{
+		if (strcmp(lv_label_get_text(list_item[i]), labels[i]) != 0)
+		{
+			lv_label_set_text(list_item[i], labels[i]);
+			dirty = true;
+		}
+	}
+
+	if (selected != list_sel)
+	{
+		for (int i = 0; i < count; i++)
+		{
+			lv_obj_set_style_text_color(list_item[i],
+										(i == selected) ? lv_color_white() : lv_color_black(), 0);
+		}
+		lv_obj_set_y(list_cursor, top + selected * MENU_ITEM_H);
+		list_sel = selected;
+		dirty = true;
+	}
+}
+
+void ui::set_value_edit(const char *title, const char *value, const char *unit, const char *sub,
+						const char *hint)
 {
 	if (!ready)
 	{
 		return;
 	}
-	pending_view = VIEW_MENU;
+	pending_view = VIEW_VALUE;
 
-	const int sel = (int)selected;
-	if (sel == last_menu_sel)
-	{
-		return; // same entry already highlighted
-	}
+	lv_label_set_text(value_title, title ? title : "");
+	lv_label_set_text(value_num, value ? value : "");
+	lv_label_set_text(value_unit, unit ? unit : "");
+	lv_label_set_text(value_sub, sub ? sub : "");
+	lv_label_set_text(value_hint, hint ? hint : "");
 
-	if (menu_row[sel] < 0)
-	{
-		return; // an entry this build does not have; menu.cpp must not select it
-	}
-
-	for (int i = 0; i < (int)Menu::Count; i++)
-	{
-		if (menu_item[i])
-		{
-			lv_obj_set_style_text_color(menu_item[i],
-										(i == sel) ? lv_color_white() : lv_color_black(), 0);
-		}
-	}
-	lv_obj_set_y(menu_cursor, menu_top(menu_rows) + menu_row[sel] * MENU_ITEM_H);
-
-	last_menu_sel = sel;
 	dirty = true;
 }
 

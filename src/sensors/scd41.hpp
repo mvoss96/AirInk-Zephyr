@@ -17,12 +17,46 @@ struct Scd41Reading
 
 namespace scd41
 {
-	/** Check the device is ready and disable automatic self-calibration.
+	/** What the sensor has been told about where it is standing.
+	 *
+	 * All three are things only a human knows, and all three change what the sensor reports:
+	 *
+	 *  - the SCD41 warms itself, and the enclosure holds that warmth. The offset is what it subtracts
+	 *    from what it measures; the factory ships 4.0 C and the right value depends on the case.
+	 *  - thinner air holds less CO2 per volume. Above ~200 m the reading drifts without this.
+	 *  - self-calibration lets the sensor trim itself against weeks of fresh-air minima, which is
+	 *    right in a room that is aired and wrong in one that never is.
+	 *
+	 * The defaults are the sensor's own, except for self-calibration: this firmware has always shipped
+	 * with it off, and a default that changes behaviour on upgrade is not a default.
+	 */
+	struct Trim
+	{
+		int temp_offset_x10 = 40; // tenths of a degree C, 0..200 (the SCD41 allows 0..20 C)
+		int altitude_m = 0;		  // metres above sea level, 0..3000
+		bool auto_calib = false;  // ASC
+	};
+
+	/** Check the device is ready and put the factory trim into it. See set_trim().
 	 *
 	 * @retval 0       the sensor is present and configured
 	 * @retval -ENODEV the devicetree node `scd41` is not ready
 	 */
 	int init();
+
+	/** Tell the sensor where it is standing.
+	 *
+	 * Volatile, on purpose: nothing here is written to the SCD41's EEPROM, whose life is measured in
+	 * thousands of writes -- and these are values a user is meant to sit and turn until the panel
+	 * agrees with the thermometer in their hand. They belong in our own NVS (prefs) and are pushed
+	 * back into the sensor on every boot, which costs three I2C transfers.
+	 *
+	 * @param t what to tell it
+	 * @retval 0       all three landed
+	 * @retval -EIO    at least one did not; the log says which, and the others still took
+	 * @retval -ENODEV no sensor
+	 */
+	int set_trim(const Trim &t);
 
 	/** Take a full single-shot measurement: CO2 + temperature + humidity.
 	 * Blocks for ~5 s while the photoacoustic CO2 measurement runs.

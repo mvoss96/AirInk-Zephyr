@@ -32,40 +32,30 @@ namespace
 		k_msleep(30); // wake-up time per datasheet
 	}
 
-	/** Disable automatic self-calibration and persist the setting to EEPROM.
-	 * Writes EEPROM only when ASC is still enabled, to spare its limited endurance.
-	 * Failures are logged, not propagated: a sensor with ASC still on still measures.
+	/** Write one SCD41 setting. Volatile: the value lives in the sensor's RAM until it loses power.
+	 *
+	 * val1/val2 and not a single integer, because the driver reads the temperature offset as a real
+	 * number of degrees -- `val1 + val2/1e6` -- and an offset written as whole degrees would silently
+	 * throw away the half the user just dialled in.
+	 *
+	 * @param attr the SCD4X-private attribute
+	 * @param val1 the whole part, in the attribute's own units
+	 * @param val2 the fraction, in millionths
+	 * @param what what to call it if it fails
+	 * @retval 0    written
+	 * @retval -EIO the sensor would not take it
 	 */
-	void disable_asc()
+	int put(int attr, int32_t val1, int32_t val2, const char *what)
 	{
-		struct sensor_value asc;
-
-		wake();
-
-		if (sensor_attr_get(scd41_dev, SENSOR_CHAN_CO2, (enum sensor_attribute)SENSOR_ATTR_SCD4X_AUTOMATIC_CALIB_ENABLE, &asc) < 0)
+		struct sensor_value sv{};
+		sv.val1 = val1;
+		sv.val2 = val2;
+		if (sensor_attr_set(scd41_dev, SENSOR_CHAN_CO2, (enum sensor_attribute)attr, &sv) < 0)
 		{
-			printk("SCD41: could not read ASC state\n");
-			return;
+			printk("SCD41: could not set %s\n", what);
+			return -EIO;
 		}
-		if (asc.val1 == 0)
-		{
-			printk("SCD41: ASC already disabled\n");
-			return;
-		}
-
-		struct sensor_value off{}; // val1 = val2 = 0 -> ASC off
-
-		if (sensor_attr_set(scd41_dev, SENSOR_CHAN_CO2, (enum sensor_attribute)SENSOR_ATTR_SCD4X_AUTOMATIC_CALIB_ENABLE, &off) < 0)
-		{
-			printk("SCD41: failed to disable ASC\n");
-			return;
-		}
-		if (scd4x_persist_settings(scd41_dev) < 0)
-		{
-			printk("SCD41: failed to persist settings\n");
-			return;
-		}
-		printk("SCD41: ASC disabled and persisted to EEPROM\n");
+		return 0;
 	}
 
 	/** Leave periodic measurement and wait for the sensor to go idle.
@@ -103,8 +93,41 @@ int scd41::init()
 	{
 		return -ENODEV;
 	}
-	disable_asc();
+	// The trim is NOT applied here. It is the user's, it lives in prefs, and only the caller has read
+	// them -- app::run() calls set_trim() a moment later. Applying the factory defaults first would be
+	// three I2C writes that the next three I2C writes undo, and a log line that says the wrong thing.
+	// A caller that has no prefs (the bench harness) gets whatever the sensor's EEPROM holds, which is
+	// exactly what a bench should measure.
 	return 0;
+}
+
+int scd41::set_trim(const Trim &t)
+{
+	if (!device_is_ready(scd41_dev))
+	{
+		return -ENODEV;
+	}
+
+	// The driver's attr_set does not wake the sensor, and in single-shot mode it is asleep between
+	// readings -- so a setting written to a sleeping SCD41 is NACKed and quietly lost.
+	wake();
+
+	int err = 0;
+	err |= put(SENSOR_ATTR_SCD4X_TEMPERATURE_OFFSET, t.temp_offset_x10 / 10,
+			   (t.temp_offset_x10 % 10) * 100000, "temperature offset");
+	err |= put(SENSOR_ATTR_SCD4X_SENSOR_ALTITUDE, t.altitude_m, 0, "altitude");
+	err |= put(SENSOR_ATTR_SCD4X_AUTOMATIC_CALIB_ENABLE, t.auto_calib ? 1 : 0, 0,
+			   "self-calibration");
+
+	// Deliberately NOT persisted. scd4x_persist_settings() writes the sensor's EEPROM, which has a
+	// life measured in thousands of writes -- and these are settings a user is meant to sit and turn
+	// until the panel agrees with their thermometer. They live in our own NVS instead (prefs) and are
+	// written back into the sensor's RAM on every boot, which costs three I2C transfers and nothing
+	// else. The sensor's EEPROM is its business; ours is ours.
+	printk("[SCD41] trim: offset %d.%d C, altitude %d m, self-calib %s%s\n", t.temp_offset_x10 / 10,
+		   abs(t.temp_offset_x10 % 10), t.altitude_m, t.auto_calib ? "on" : "off",
+		   err ? "  (INCOMPLETE)" : "");
+	return err;
 }
 
 int scd41::sample(Scd41Reading *out)
