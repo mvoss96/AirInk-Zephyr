@@ -18,14 +18,21 @@
 namespace ui
 {
 
-	// Connectivity shown in the status bar.
+	/** What the radio is doing.
+	 *
+	 * The status bar draws exactly one of these -- ThreadConnected, as signal bars. Everything else
+	 * means "no bars", and the bar is left empty rather than filled with a word.
+	 *
+	 * It used to print a token for each: "BLE..", "TH", "--". They are gone. "TH" told you which
+	 * protocol the device speaks, which is not something anyone standing in front of a CO2 monitor
+	 * wants to know, and the pairing screen says the BLE part properly and in words. The states
+	 * themselves stay because the radio really is in them and app_task reports them.
+	 */
 	enum class Link
 	{
 		None,
 		BleAdv,
 		BleConnected,
-		ZigbeeJoining,
-		ZigbeeConnected,
 		ThreadJoining,
 		ThreadConnected
 	};
@@ -116,9 +123,12 @@ namespace ui
 	 */
 	void set_battery(uint8_t pct, bool charging);
 
-	/** Stage the connectivity token, shown on every view.
+	/** Stage the radio state, which the status bar carries across every view.
 	 *
-	 * @param state radio state; ui::Link::None draws "--"
+	 * Nothing is drawn for it except signal bars, and those only on a joined Thread link that has
+	 * been measured (set_signal). Any other state empties that corner of the bar.
+	 *
+	 * @param state radio state
 	 */
 	void set_link(Link state);
 

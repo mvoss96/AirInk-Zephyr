@@ -4,8 +4,12 @@ Derived from the NCS v3.4.0 `samples/matter/temperature_sensor`, retargeted to t
 AirInk hardware (`promicro_nrf52840/nrf52840`) and stripped of its MCUboot/OTA/DK
 assumptions so it runs as a **plain single image at 0x1000, flashed via UF2** — the same
 field-update story AirInk uses today. This is the Stage 2 + Stage 3 bring-up snapshot; the
-eventual goal is to merge AirInk's e-paper UI in (Stage 5). See the plan and the project
-memory `matter-zigbee-plan` for the full roadmap.
+eventual goal is to merge AirInk's e-paper UI in (Stage 5).
+
+Matter over Thread is the only radio this device has, and the only one it is going to have.
+Zigbee was carried as a fallback while the RAM budget was in doubt — Matter's ~158 KB was the
+whole risk of the project — and it stopped being one the day the full UI fitted alongside it.
+Nothing Zigbee is left in the tree.
 
 ## Status (verified on hardware, 2026-07-13)
 

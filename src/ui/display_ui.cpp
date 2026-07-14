@@ -72,7 +72,7 @@ namespace
 
 	// Status bar (never hidden).
 	lv_obj_t *status_bar;
-	lv_obj_t *batt_frame, *batt_fill, *batt_bolt, *batt_pct_lbl, *link_lbl;
+	lv_obj_t *batt_frame, *batt_fill, *batt_bolt, *batt_pct_lbl;
 	int last_charging = -1;
 
 	/* The signal bars, shown in place of the link token once there is a Thread network to measure.
@@ -416,33 +416,6 @@ namespace
 		}
 	}
 
-	/** The short text shown in the status bar for a radio state.
-	 *
-	 * @param state the connectivity state
-	 * @return a static string, e.g. "BLE" or "ZB.."; "--" when there is no link
-	 */
-	const char *link_token(ui::Link state)
-	{
-		switch (state)
-		{
-		case ui::Link::BleAdv:
-			return "BLE..";
-		case ui::Link::BleConnected:
-			return "BLE";
-		case ui::Link::ZigbeeJoining:
-			return "ZB..";
-		case ui::Link::ZigbeeConnected:
-			return "ZB";
-		case ui::Link::ThreadJoining:
-			return "TH..";
-		case ui::Link::ThreadConnected:
-			return "TH";
-		case ui::Link::None:
-			break;
-		}
-		return "--";
-	}
-
 	// ---- builders (once, in init); `scr` is the active screen ----
 
 	/** Build the always-visible status bar: battery, bolt, and -- where there is a radio -- the link.
@@ -497,18 +470,16 @@ namespace
 		lv_obj_align_to(batt_bolt, batt_frame, LV_ALIGN_OUT_RIGHT_MID, 10, 0);
 		lv_obj_add_flag(batt_bolt, LV_OBJ_FLAG_HIDDEN);
 
-		// Link: short text token, right-aligned. What it says is "which radio, and is it up yet" --
-		// BLE while commissioning, "TH.." while joining, "--" when there is nothing. Once a Thread
-		// network is actually joined it steps aside for the bars below, which answer the question a
-		// joined device raises instead: is it standing anywhere useful?
-		link_lbl = make_label(status_bar, &b612_14, 0);
-		lv_obj_align(link_lbl, LV_ALIGN_RIGHT_MID, -6, 0);
-		lv_label_set_text(link_lbl, link_token(ui::Link::None));
-		set_hidden(link_lbl, !has_radio); // a build with no radio says nothing, not "--"
-
-		// Four bars on a shared baseline, ascending. Filled = earned; an empty outline = the level
-		// exists but is not reached, which is what makes "one bar" read as one OF four rather than
-		// as a lonely rectangle. Drawn right to left from the same anchor as the token above.
+		// The link, and the only thing said about it: four bars on a shared baseline, ascending.
+		// Filled = earned; an empty outline = the level exists but is not reached, which is what makes
+		// "one bar" read as one OF four rather than as a lonely rectangle.
+		//
+		// There used to be a text token here as well -- "TH", "BLE..", "--". It is gone, and nothing
+		// replaced it: the bar is either showing a strength or it is showing nothing. "TH" told you
+		// which radio protocol the device speaks, which is not a thing anyone standing in front of a
+		// CO2 monitor wants to know, and "BLE.." belongs on the pairing screen, which says it properly
+		// and in words. An empty right-hand side means there is nothing to report -- not commissioned,
+		// not joined, or joined and not yet measured -- and that is the honest amount to say.
 		//
 		// The sizes are not free choices. A 1 px border needs an interior big enough to still look
 		// like a hole on a 1-bit panel: at 4x4 the smallest bar had 2x2 white left in it and read as
@@ -1151,17 +1122,15 @@ void ui::set_link(Link state)
 		return;
 	}
 
-	// Exactly one of the two is up. On a joined Thread network the bars take over -- but only once a
-	// strength has actually been measured: between joining and the first reading there is nothing to
-	// draw, and four empty outlines would claim there is (they mean "attached, no signal", which is
-	// a real and much worse state than "not asked yet"). So the token holds the place until then.
+	// The bars stand for a joined Thread link, and only once a strength has actually been measured:
+	// between joining and the first reading there is nothing to draw, and four empty outlines would
+	// claim there is -- they mean "attached, no signal", a real and much worse state than "not asked
+	// yet". Until then the status bar simply says nothing, which is the truth.
 	const bool bars = (state == Link::ThreadConnected) && (last_bars >= 0);
 	for (int i = 0; i < SIGNAL_BARS; i++)
 	{
 		set_hidden(signal_bar[i], !bars);
 	}
-	set_hidden(link_lbl, bars);
-	lv_label_set_text(link_lbl, link_token(state));
 
 	last_link = (int)state;
 	dirty = true;
@@ -1188,14 +1157,13 @@ void ui::set_signal(int rssi_dbm)
 		lv_obj_set_style_border_width(signal_bar[i], on ? 0 : 1, 0);
 	}
 
-	// The first measurement is also what lets the bars replace the token -- see set_link().
+	// The first measurement is also what brings the bars out at all -- see set_link().
 	if (last_bars < 0 && last_link == (int)Link::ThreadConnected)
 	{
 		for (int i = 0; i < SIGNAL_BARS; i++)
 		{
 			set_hidden(signal_bar[i], false);
 		}
-		set_hidden(link_lbl, true);
 	}
 
 	last_bars = bars;
