@@ -82,6 +82,12 @@ namespace
 	lv_obj_t *signal_bar[SIGNAL_BARS];
 	int last_bars = -1; // -1 = nothing measured yet
 
+	/* Whether this build has a radio at all. Without one the right-hand side of the status bar stays
+	 * empty -- no bars, and no "--" either. A dash is an answer to "how is the link?", and a device
+	 * that cannot have a link is not being asked. It used to sit there for the life of the standalone
+	 * firmware, quietly implying that something was missing. */
+	bool has_radio;
+
 	/* Charging bolt as a filled 1bpp image (I1: index0 = black bolt, index1 =
 	 * white bg, which is invisible on the white status bar). Shown in place of
 	 * the percentage while charging. 12x16, generated from ASCII art. */
@@ -439,9 +445,17 @@ namespace
 
 	// ---- builders (once, in init); `scr` is the active screen ----
 
-	/** Build the always-visible status bar: battery, bolt, link token. */
-	void build_status_bar(lv_obj_t *scr)
+	/** Build the always-visible status bar: battery, bolt, and -- where there is a radio -- the link.
+	 *
+	 * @param scr        the active screen
+	 * @param with_radio whether this build can have a link at all; if not, the right-hand side is
+	 *                   left empty rather than filled with a dash that answers a question the device
+	 *                   is not being asked
+	 */
+	void build_status_bar(lv_obj_t *scr, bool with_radio)
 	{
+		has_radio = with_radio;
+
 		status_bar = lv_obj_create(scr);
 		lv_obj_remove_style_all(status_bar);
 		lv_obj_set_size(status_bar, SCR_W, STATUS_H);
@@ -490,6 +504,7 @@ namespace
 		link_lbl = make_label(status_bar, &b612_14, 0);
 		lv_obj_align(link_lbl, LV_ALIGN_RIGHT_MID, -6, 0);
 		lv_label_set_text(link_lbl, link_token(ui::Link::None));
+		set_hidden(link_lbl, !has_radio); // a build with no radio says nothing, not "--"
 
 		// Four bars on a shared baseline, ascending. Filled = earned; an empty outline = the level
 		// exists but is not reached, which is what makes "one bar" read as one OF four rather than
@@ -868,7 +883,9 @@ int ui::init(const Config &cfg)
 	// Weigh each view as it is built: they are all resident, so this is the standing
 	// cost of the pool, and the number to look at before adding the next screen.
 	uint32_t h = heap_used();
-	build_status_bar(scr);
+	// Onboarding codes are what a radio build has and a radio-less one does not -- the same test the
+	// menu uses to decide whether there is a Matter row.
+	build_status_bar(scr, cfg.pair_qr != nullptr);
 	h = log_built("status bar", h);
 	build_boot(scr, cfg.build);
 	h = log_built("boot", h);
@@ -1125,9 +1142,9 @@ void ui::set_battery(uint8_t pct, bool charging)
 
 void ui::set_link(Link state)
 {
-	if (!ready)
+	if (!ready || !has_radio)
 	{
-		return;
+		return; // nothing to report, and nowhere it would be drawn
 	}
 	if ((int)state == last_link)
 	{
@@ -1152,7 +1169,7 @@ void ui::set_link(Link state)
 
 void ui::set_signal(int rssi_dbm)
 {
-	if (!ready)
+	if (!ready || !has_radio)
 	{
 		return;
 	}
