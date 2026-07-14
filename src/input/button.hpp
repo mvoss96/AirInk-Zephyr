@@ -1,7 +1,6 @@
 #pragma once
 #include <stdint.h>
-#include <zephyr/kernel.h> // k_msgq, for queue() below: naming it inside the namespace without
-						   // the real declaration would define a *new* type, button::k_msgq
+#include <zephyr/kernel.h>
 
 /** @file
  * The single user button (P0.11), classified into two gestures.
