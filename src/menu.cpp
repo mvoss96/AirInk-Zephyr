@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <zephyr/kernel.h>
 
+#include "prefs.hpp"
 #include "sensors/scd41.hpp"
 #include "ui/display_ui.hpp"
 
@@ -92,6 +93,30 @@ namespace
 	void to_root()
 	{
 		go(State::Root);
+		idle_at = k_uptime_get() + MENU_IDLE_MS;
+		ui::set_menu(cursor);
+	}
+
+	/** Celsius <-> Fahrenheit, in place.
+	 *
+	 * The only entry that has no screen behind it. Every other one opens a view and asks something;
+	 * this one has nothing to ask -- there are two units and the row already says which is in force,
+	 * so a screen would only be a place to press the button a second time. The hold does the thing,
+	 * the row rewrites itself, and the user stays where they are and can carry on down the list.
+	 *
+	 * prefs writes it to flash. If that write fails the unit still changes for this session (see
+	 * prefs::set_temp_unit) -- the panel obeys, and the log says it will not survive a reboot.
+	 */
+	void toggle_units()
+	{
+		const ui::TempUnit next = (ui::temp_unit_shown() == ui::TempUnit::Celsius)
+									  ? ui::TempUnit::Fahrenheit
+									  : ui::TempUnit::Celsius;
+		prefs::set_temp_unit(next);
+		ui::set_temp_unit(next);
+
+		// Stay on Root, cursor untouched -- but the row's text just changed, so the menu has to be
+		// re-staged for the refresh that follows.
 		idle_at = k_uptime_get() + MENU_IDLE_MS;
 		ui::set_menu(cursor);
 	}
@@ -237,6 +262,9 @@ menu::Status menu::proceed(button::Event e)
 			{
 			case ui::Menu::Calibrate:
 				to_calib_prompt();
+				break;
+			case ui::Menu::Units:
+				toggle_units();
 				break;
 			case ui::Menu::Matter:
 				to_matter();

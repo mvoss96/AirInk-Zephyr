@@ -43,10 +43,23 @@ namespace ui
 	enum class Menu : uint8_t
 	{
 		Calibrate,
+		Units,
 		Matter,
 		FactoryReset,
 		Exit,
 		Count
+	};
+
+	/** The unit the panel shows temperature in.
+	 *
+	 * A display preference and nothing more. The sensor reads Celsius and the Matter cluster reports
+	 * Celsius, because that is what the protocol says; this only decides what is painted. It lives
+	 * here rather than in the store that persists it, because the UI is what has units.
+	 */
+	enum class TempUnit : uint8_t
+	{
+		Celsius,
+		Fahrenheit
 	};
 
 	/** What this build of the device can actually do.
@@ -126,6 +139,20 @@ namespace ui
 	 * @param hum_x100  relative humidity in hundredths of a percent
 	 */
 	void set_sensor(uint16_t co2_ppm, int32_t temp_x100, uint16_t hum_x100);
+
+	/** Change the unit temperature is shown in. Always pass Celsius readings to set_sensor(); this
+	 * decides only what is painted.
+	 *
+	 * Takes effect at once: the unit next to the number, the number itself (recomputed from the last
+	 * reading, so the panel never shows a Celsius figure under an F), and the Units menu row. Like
+	 * every other setter it only stages -- ui::refresh() puts it on the glass.
+	 *
+	 * It does not persist anything. prefs (src/prefs.cpp) is the store; this is the display.
+	 */
+	void set_temp_unit(TempUnit u);
+
+	/** The unit currently painted. The menu asks, so that a hold can toggle it. */
+	TempUnit temp_unit_shown();
 
 	/** Select the error view and stage its text.
 	 *

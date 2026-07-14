@@ -43,10 +43,29 @@ namespace
 	constexpr int STATUS_H = 28;
 	constexpr int CONTENT_Y = STATUS_H, CONTENT_W = SCR_W, CONTENT_H = SCR_H - STATUS_H;
 	constexpr int FULL_REFRESH_EVERY = 100;
-	// The entries are centred as a block, so adding one keeps the menu balanced.
-	constexpr int MENU_ITEM_H = 48;
-	/* The entries are centred as a block, so a build with fewer of them stays balanced. */
-	inline int menu_top(int rows) { return (CONTENT_H - rows * MENU_ITEM_H) / 2; }
+	/* The menu is a block of entries and a hint line under them; the entries get what is left.
+	 *
+	 * There used to be a "MENU" title and a rule above the list. They went, and taking them out is
+	 * what makes five entries fit comfortably: a list with a cursor on it, over a line that reads
+	 * "Tap = next   Hold = select", does not also need to be told it is a menu. The 36 px they cost
+	 * are worth more as space between the rows.
+	 *
+	 * The height matters more than it looks. This block used to be centred in the whole content
+	 * area, which held up exactly until a fifth entry arrived: the block grew, its top crossed the
+	 * header rule, and "Calibrate CO2" was painted straight through it. Nothing complained -- LVGL
+	 * will happily draw a label over a line. Hence the static_assert: the next entry that does not
+	 * fit fails the build instead of the panel. */
+	constexpr int MENU_HINT_H = 26; // "Tap = next   Hold = select"
+	constexpr int MENU_ITEM_H = 44;
+
+	static_assert((int)ui::Menu::Count * MENU_ITEM_H + MENU_HINT_H <= CONTENT_H,
+				  "the menu entries no longer fit above the hint -- shrink MENU_ITEM_H, or the "
+				  "panel will draw them on top of each other");
+
+	inline int menu_top(int rows)
+	{
+		return (CONTENT_H - MENU_HINT_H - rows * MENU_ITEM_H) / 2;
+	}
 
 	constexpr int BAR_W = 300, BAR_H = 32, BAR_BORDER = 3;
 	constexpr int BAR_INNER_W = BAR_W - 2 * BAR_BORDER;
@@ -97,7 +116,7 @@ namespace
 
 	// Content views (exactly one un-hidden at a time).
 	lv_obj_t *boot_root;
-	lv_obj_t *sensor_root, *co2_value, *hum_value, *temp_value;
+	lv_obj_t *sensor_root, *co2_value, *hum_value, *temp_value, *temp_unit_lbl;
 	lv_obj_t *error_root, *err_title_lbl, *err_detail_lbl;
 	lv_obj_t *lowbat_root, *lowbat_fill, *lowbat_pct_lbl;
 	lv_obj_t *reset_root;
@@ -144,11 +163,44 @@ namespace
 	int partials_since_full;
 	bool ready; // init() built the widgets; every entry point no-ops until then
 
+	/* What the panel shows temperature in. A display preference; the sensor and the Matter cluster
+	 * stay in Celsius. The store that survives a reboot is prefs (src/prefs.cpp) -- this is only what
+	 * the widgets are currently painting. */
+	ui::TempUnit temp_unit = ui::TempUnit::Celsius;
+
+	/** The unit as it appears next to the number: "°C" / "°F" (0xB0 is in every B612 we generate). */
+	const char *unit_token(ui::TempUnit u)
+	{
+		return u == ui::TempUnit::Fahrenheit ? "\xC2\xB0"
+											   "F"
+											 : "\xC2\xB0"
+											   "C";
+	}
+
+	/** The Units menu row. It states the unit in force rather than the one a hold would switch to:
+	 * every other row names what it does, but this one is the only place the setting is visible at
+	 * all, and a row that reads "Units: °F" while the panel says °C is a lie however you argue it. */
+	const char *units_row_text(ui::TempUnit u)
+	{
+		return u == ui::TempUnit::Fahrenheit ? "Units: \xC2\xB0"
+											   "F"
+											 : "Units: \xC2\xB0"
+											   "C";
+	}
+
 	/* Skip-refresh dedup. The last_* sentinels are int, not the API's uint8_t,
-	 * because they use -1 for "nothing shown yet". */
+	 * because they use -1 for "nothing shown yet".
+	 *
+	 * last_temp_x100 is in hundredths of the DISPLAYED unit, not of Celsius -- see set_sensor(). */
 	bool have_last_reading;
 	uint16_t last_co2_ppm, last_hum_x100;
 	int32_t last_temp_x100;
+
+	/* The reading itself, as the sensor gave it (Celsius). The dedup key above is in whatever unit
+	 * is on the panel, so it cannot be converted back -- and set_temp_unit() has to repaint the
+	 * number immediately, not leave the old one standing under the new unit until the next
+	 * measurement arrives half a minute later. */
+	int32_t last_temp_c_x100;
 	int last_batt_pct = -1;
 	int last_link = -1;
 	int last_lowbat_pct = -1;
@@ -459,9 +511,12 @@ namespace
 		sensor_root = make_view(scr);
 
 		// Each metric is a cell: big value + small unit on one baseline, caption
-		// pinned below. Returns the value label so callers can update it.
+		// pinned below. Returns the value label so callers can update it; unit_out, where a caller
+		// asks for it, receives the small unit label -- temperature is the one whose unit can change
+		// while the device is running.
 		auto make_metric = [&](lv_align_t align, int y, int w, int h,
-							   const char *unit, const char *name) -> lv_obj_t *
+							   const char *unit, const char *name,
+							   lv_obj_t **unit_out = nullptr) -> lv_obj_t *
 		{
 			lv_obj_t *cell = lv_obj_create(sensor_root);
 			lv_obj_remove_style_all(cell);
@@ -489,6 +544,10 @@ namespace
 			lv_obj_t *nm = make_label(cell, &b612_16, w);
 			lv_label_set_text(nm, name);
 			lv_obj_align(nm, LV_ALIGN_BOTTOM_MID, 0, -6);
+			if (unit_out)
+			{
+				*unit_out = u;
+			}
 			return val;
 		};
 
@@ -509,9 +568,8 @@ namespace
 		hum_value = make_metric(LV_ALIGN_TOP_LEFT, cell_top, cell_w, cell_h, "%", "Humidity");
 		lv_label_set_text(hum_value, "--");
 
-		temp_value = make_metric(LV_ALIGN_TOP_RIGHT, cell_top, cell_w, cell_h, "\xC2\xB0"
-																			   "C",
-								 "Temperature");
+		temp_value = make_metric(LV_ALIGN_TOP_RIGHT, cell_top, cell_w, cell_h, unit_token(temp_unit),
+								 "Temperature", &temp_unit_lbl);
 		lv_label_set_text(temp_value, "--");
 	}
 
@@ -582,7 +640,7 @@ namespace
 		lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -10);
 	}
 
-	/** Build the settings menu: a header, one label per entry, a moving cursor.
+	/** Build the settings menu: one label per entry, a moving cursor, and the hint under them.
 	 *
 	 * Only the entries this build has: Pairing is skipped when there are no onboarding codes,
 	 * and the entries below it move up. menu_row[] records where each one landed, so the
@@ -596,18 +654,14 @@ namespace
 	{
 		menu_root = make_view(scr);
 
-		lv_obj_t *hdr = make_label(menu_root, &b612_16, CONTENT_W);
-		lv_label_set_text(hdr, "MENU");
-		lv_obj_align(hdr, LV_ALIGN_TOP_MID, 0, 8);
-
-		lv_obj_t *rule = make_divider(menu_root, CONTENT_W - 48, 1);
-		lv_obj_align(rule, LV_ALIGN_TOP_MID, 0, 32);
-
-		static const char *const names[] = {"Calibrate CO2", "Matter", "Factory reset", "Exit"};
+		// Units is the one row whose label is not fixed: it carries the current unit, and
+		// set_temp_unit() rewrites it. The placeholder here is replaced below.
+		const char *const names[] = {"Calibrate CO2", units_row_text(temp_unit), "Matter",
+									 "Factory reset", "Exit"};
 		static_assert(sizeof(names) / sizeof(names[0]) == (size_t)ui::Menu::Count,
 					  "every menu entry needs a label");
 
-		const bool present[] = {true, with_matter, with_reset, true};
+		const bool present[] = {true, true, with_matter, with_reset, true};
 		static_assert(sizeof(present) / sizeof(present[0]) == (size_t)ui::Menu::Count,
 					  "every menu entry needs to say whether it exists");
 
@@ -632,7 +686,9 @@ namespace
 			}
 			menu_item[i] = make_label(menu_root, &b612_28, CONTENT_W - 32);
 			lv_label_set_text(menu_item[i], names[i]);
-			lv_obj_set_pos(menu_item[i], 16, menu_top(menu_rows) + menu_row[i] * MENU_ITEM_H + 7);
+			// Centre the 28 px line in its row, so the highlight bar sits square around it.
+			lv_obj_set_pos(menu_item[i], 16,
+						   menu_top(menu_rows) + menu_row[i] * MENU_ITEM_H + (MENU_ITEM_H - 28) / 2);
 		}
 
 		lv_obj_t *hint = make_label(menu_root, &b612_14, CONTENT_W);
@@ -836,12 +892,17 @@ void ui::set_sensor(uint16_t co2_ppm, int32_t temp_x100, uint16_t hum_x100)
 		return;
 	}
 
-	// Dedup on the DISPLAYED value (CO2 exact ppm, T to 0.1 C, RH to whole %) so a
-	// change below what's shown (e.g. 26.03 -> 26.05 C, or 43.05 -> 43.17 % which
-	// both show "43") does not force an e-paper refresh. On the 30 s T+RH cadence a
-	// no-change tick then costs ~0.16 mAs (SCD41 read only) instead of a ~3 mAs
-	// refresh -- see docs/power-analysis.md.
-	const int32_t temp_q = quantize_temp_x100(temp_x100);
+	// Dedup on the DISPLAYED value (CO2 exact ppm, T to what the current unit shows, RH to whole %)
+	// so a change below what's shown (e.g. 26.03 -> 26.05 C, or 43.05 -> 43.17 % which both show
+	// "43") does not force an e-paper refresh. On the 30 s T+RH cadence a no-change tick then costs
+	// ~0.16 mAs (SCD41 read only) instead of a ~3 mAs refresh -- see docs/power-analysis.md.
+	//
+	// So the key must be in the unit on the panel, not in the sensor's. In Fahrenheit that is whole
+	// degrees, which is coarser than the 0.1 C of the other unit -- the same room therefore refreshes
+	// LESS often in F, not more.
+	const bool fahrenheit = (temp_unit == ui::TempUnit::Fahrenheit);
+	const int32_t temp_q =
+		fahrenheit ? quantize_temp_f_x100(temp_x100) : quantize_temp_x100(temp_x100);
 	const uint16_t hum_q = quantize_hum_x100(hum_x100);
 
 	if (have_last_reading && co2_ppm == last_co2_ppm &&
@@ -855,16 +916,65 @@ void ui::set_sensor(uint16_t co2_ppm, int32_t temp_x100, uint16_t hum_x100)
 	lv_label_set_text(co2_value, buf);
 	snprintf(buf, sizeof(buf), "%u", (unsigned)(hum_q / 100));
 	lv_label_set_text(hum_value, buf);
-	const int whole = temp_q / 100;
-	const int frac = abs(temp_q % 100) / 10;
-	snprintf(buf, sizeof(buf), "%d.%d", whole, frac);
+	if (fahrenheit)
+	{
+		snprintf(buf, sizeof(buf), "%d", (int)(temp_q / 100));
+	}
+	else
+	{
+		snprintf(buf, sizeof(buf), "%d.%d", (int)(temp_q / 100), (int)(abs(temp_q % 100) / 10));
+	}
 	lv_label_set_text(temp_value, buf);
 
 	last_co2_ppm = co2_ppm;
 	last_temp_x100 = temp_q;
+	last_temp_c_x100 = temp_x100;
 	last_hum_x100 = hum_q;
 	have_last_reading = true;
 	dirty = true;
+}
+
+void ui::set_temp_unit(TempUnit u)
+{
+	if (!ready || u == temp_unit)
+	{
+		return;
+	}
+	temp_unit = u;
+
+	lv_label_set_text(temp_unit_lbl, unit_token(u));
+	if (menu_item[(int)Menu::Units])
+	{
+		lv_label_set_text(menu_item[(int)Menu::Units], units_row_text(u));
+	}
+
+	// Repaint the number under the new unit from the reading we kept, so the switch is complete the
+	// moment it happens. Without this the panel would show, say, 24.3 with a F next to it until the
+	// next measurement landed.
+	if (have_last_reading)
+	{
+		const bool fahrenheit = (u == TempUnit::Fahrenheit);
+		last_temp_x100 = fahrenheit ? quantize_temp_f_x100(last_temp_c_x100)
+									: quantize_temp_x100(last_temp_c_x100);
+		char buf[24];
+		if (fahrenheit)
+		{
+			snprintf(buf, sizeof(buf), "%d", (int)(last_temp_x100 / 100));
+		}
+		else
+		{
+			snprintf(buf, sizeof(buf), "%d.%d", (int)(last_temp_x100 / 100),
+					 (int)(abs(last_temp_x100 % 100) / 10));
+		}
+		lv_label_set_text(temp_value, buf);
+	}
+
+	dirty = true;
+}
+
+ui::TempUnit ui::temp_unit_shown()
+{
+	return temp_unit;
 }
 
 void ui::set_error(const char *title, const char *detail)

@@ -34,5 +34,6 @@ set(AIRINK_DEVICE_SOURCES
 set(AIRINK_LOOP_SOURCES
 	${AIRINK_ROOT}/src/app.cpp
 	${AIRINK_ROOT}/src/menu.cpp
+	${AIRINK_ROOT}/src/prefs.cpp
 	${AIRINK_ROOT}/src/input/button.cpp
 )

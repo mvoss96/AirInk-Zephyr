@@ -142,6 +142,19 @@ int main(int argc, char **argv)
 	ui::refresh();
 	snapshot("sensor_high");
 
+	// The same reading in the other unit. Whole degrees in Fahrenheit, one decimal in Celsius -- the
+	// panel shows what the sensor can distinguish in the unit on screen, and 0.1 F it cannot. Note
+	// the number is NOT re-measured: set_temp_unit repaints from the reading it kept, which is
+	// exactly what a user pressing the button in a still room sees.
+	g_tick_ms += 100;
+	ui::set_temp_unit(ui::TempUnit::Fahrenheit);
+	ui::refresh();
+	snapshot("sensor_fahrenheit");
+
+	g_tick_ms += 100;
+	ui::set_temp_unit(ui::TempUnit::Celsius);
+	ui::refresh();
+
 	g_tick_ms += 100;
 	ui::set_battery(4, false); // the warning draws this level
 	ui::set_low_battery();
@@ -155,6 +168,22 @@ int main(int argc, char **argv)
 	ui::set_menu(ui::Menu::Calibrate);
 	ui::refresh();
 	snapshot("menu");
+
+	// The Units row states the unit in force, so it has two looks and both are worth seeing: it is
+	// the only place the setting is visible, and a hold rewrites the row under the cursor.
+	g_tick_ms += 100;
+	ui::set_menu(ui::Menu::Units);
+	ui::refresh();
+	snapshot("menu_units_c");
+
+	g_tick_ms += 100;
+	ui::set_temp_unit(ui::TempUnit::Fahrenheit); // what the hold does
+	ui::refresh();
+	snapshot("menu_units_f");
+
+	g_tick_ms += 100;
+	ui::set_temp_unit(ui::TempUnit::Celsius);
+	ui::refresh();
 
 	if (matter)
 	{

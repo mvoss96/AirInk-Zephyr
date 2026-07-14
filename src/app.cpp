@@ -7,6 +7,7 @@
 
 #include "input/button.hpp"
 #include "menu.hpp"
+#include "prefs.hpp"
 #include "version.hpp"
 
 static constexpr int TICK_MS = 30000;			// How often a measurement cycle runs
@@ -329,7 +330,15 @@ void app::run()
 		.pair_manual = pair_manual,
 		.factory_reset = hooks.factory_reset != nullptr,
 	};
+	// Before the panel, because ui::init() builds the sensor view and the menu with a unit already in
+	// them. A store that will not come up is survivable: prefs answers Celsius and says so in the log.
+	prefs::init();
+
 	const bool display_ok = (ui::init(ui_cfg) == 0);
+
+	// init() shows the splash, not the readings, so this lands before the user could see the wrong
+	// unit -- and it costs no extra refresh.
+	ui::set_temp_unit(prefs::temp_unit());
 
 	printk("AirInk v%s %s (%s %s) started (display %s)\n",
 		   AIRINK_VERSION, build_name, __DATE__, __TIME__, display_ok ? "ok" : "FAILED");
