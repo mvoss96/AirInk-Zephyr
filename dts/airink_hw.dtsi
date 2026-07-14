@@ -1,7 +1,8 @@
 /*
  * AirInk's hardware, shared by both builds: the standalone firmware (app.overlay) and the
- * Matter build (matter/boards/promicro_nrf52840_nrf52840.overlay, which adds a partition map
- * on top). One description, so the two cannot drift apart.
+ * Matter build (matter/boards/promicro_nrf52840_nrf52840.overlay). One description, so the two
+ * cannot drift apart -- including the flash map, which comes in via airink_flash.dtsi below and so
+ * reaches every build that describes this board, without anyone having to remember it.
  *
  *   LED    -> P0.15  (led0 alias, provided by the promicro_nrf52840 board)
  *   Button -> P0.11  (active-low, internal pull-up)
@@ -24,6 +25,9 @@
 #include <zephyr/dt-bindings/adc/adc.h>
 #include <zephyr/dt-bindings/adc/nrf-saadc.h>
 #include <zephyr/dt-bindings/regulator/nrf5x.h>
+
+/* Where things live in flash -- and, above all, where the bootloader lives so nothing lands on it. */
+#include "airink_flash.dtsi"
 
 /*
  * Enable the REG1 DC/DC buck (default is LDO). ~2x more efficient than the LDO at

@@ -1,45 +1,12 @@
 /*
- * The Matter build's devicetree: AirInk's hardware (the shared .dtsi -- same SCD41, button,
- * e-paper, battery divider and uart0 console as the standalone firmware) plus the one thing
- * that differs, a partition map.
+ * The Matter build's devicetree: AirInk's hardware -- the same SCD41, button, e-paper, battery
+ * divider and uart0 console as the standalone firmware, and the same flash map.
  *
- * No MCUboot, no external flash. Plain single image linked at 0x1000 -- exactly where the
- * Adafruit UF2 bootloader (top of flash) expects a SoftDevice-less app, the same layout the
- * standalone firmware ships with. Storage (Matter NVS) sits just below the reserved bootloader
- * region so the app never touches it.
- *
- * Flash map (1 MB):
- *   0x00000000  MBR (part of the Adafruit bootloader, already present)
- *   0x00001000  code       -> 0xEB000 = 940 KB
- *   0x000EC000  storage    -> 0x08000 = 32 KB    (Matter fabric NVS)
- *   0x000F4000  Adafruit bootloader + settings (48 KB) -- RESERVED, no partition
+ * All of it comes from the shared .dtsi. This file used to carry the partition map as the one thing
+ * that differed between the builds. It no longer differs: both run on the same board on top of the
+ * same bootloader, so the map moved to dts/airink_flash.dtsi (pulled in by airink_hw.dtsi), where
+ * both builds get it and where a build cannot forget to ask for it. See that file for the layout,
+ * and for why the board's stock map would eat the bootloader.
  */
 
 #include "../../../dts/airink_hw.dtsi"
-
-/delete-node/ &boot_partition;
-/delete-node/ &slot0_partition;
-/delete-node/ &slot1_partition;
-/delete-node/ &storage_partition;
-
-/ {
-	chosen {
-		zephyr,code-partition = &code_partition;
-	};
-};
-
-&flash0 {
-	partitions {
-		code_partition: partition@1000 {
-			compatible = "zephyr,mapped-partition";
-			label = "code";
-			reg = <0x00001000 0x000eb000>;
-		};
-
-		storage_partition: partition@ec000 {
-			compatible = "zephyr,mapped-partition";
-			label = "storage";
-			reg = <0x000ec000 0x00008000>;
-		};
-	};
-};
