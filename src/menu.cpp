@@ -201,11 +201,9 @@ namespace
 
 void menu::enter()
 {
-	state = State::Root;
 	cursor = ui::Menu::Calibrate;
-	idle_at = k_uptime_get() + MENU_IDLE_MS;
 	printk("[UI] menu opened\n");
-	ui::set_menu(cursor);
+	to_root();
 }
 
 void menu::abort()
@@ -216,7 +214,7 @@ void menu::abort()
 								? "aborted, but the sensor did not confirm"
 								: "aborted");
 	}
-	state = State::Root;
+	go(State::Root);
 }
 
 menu::Status menu::proceed(button::Event e)

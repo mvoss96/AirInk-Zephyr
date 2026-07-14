@@ -157,6 +157,27 @@ static button::Event wait(int64_t deadline_ms)
 	return button::wait_until(0); // a gesture if k_poll found one; None otherwise
 }
 
+/** Read the battery, put it on the status bar, and tell whoever is listening.
+ *
+ * Every pass of every loop starts here, so this is also where the Matter build refreshes its view of
+ * the fabric table (it rides along in the battery hook) -- which is how the onboarding screen below
+ * notices somebody commissioning us without a gesture.
+ *
+ * @return what the battery is doing, for the caller that has to act on it
+ */
+static battery::State poll_battery()
+{
+	const battery::State bat = battery::read();
+	ui::set_battery(bat.pct, bat.charging);
+	ui::set_link(link_state);
+
+	if (hooks.battery)
+	{
+		hooks.battery(bat);
+	}
+	return bat;
+}
+
 /** A device that has never joined anything boots to its own onboarding code.
  *
  * The readings are not what a factory-new device is for: nobody has told it where to send them, and
@@ -189,14 +210,7 @@ static void onboarding()
 
 	while (true)
 	{
-		// The battery hook is also what re-reads the fabric table in the Matter build, which is
-		// how the loop below sees somebody commissioning us without touching the button.
-		const battery::State bat = battery::read();
-		ui::set_battery(bat.pct, bat.charging);
-		if (hooks.battery)
-		{
-			hooks.battery(bat);
-		}
+		poll_battery(); // also refreshes is_commissioned, which is the way out below
 
 		if (is_commissioned)
 		{
@@ -223,19 +237,13 @@ static void app_loop()
 {
 	int64_t next_measure = k_uptime_get(); // the first one is due at once
 	bool menu_active = false;
+	bool was_low = false; // so the low-battery state is announced once, not every 30 s
 	button::Event e = button::Event::None;
 
 	while (true)
 	{
 		const int64_t now = k_uptime_get();
-		const battery::State bat = battery::read();
-		ui::set_battery(bat.pct, bat.charging);
-		ui::set_link(link_state);
-
-		if (hooks.battery)
-		{
-			hooks.battery(bat);
-		}
+		const battery::State bat = poll_battery();
 
 		if (bat.low)
 		{
@@ -244,7 +252,11 @@ static void app_loop()
 				menu::abort(); // a calibration would leave the SCD41 in periodic mode
 				menu_active = false;
 			}
-			printk("[LOW] batt %u%%%s  measurement suspended\n", bat.pct, bat.charging ? " CHG" : "");
+			if (!was_low)
+			{
+				printk("[LOW] batt %u%%%s  measurement suspended\n", bat.pct,
+					   bat.charging ? " CHG" : "");
+			}
 			ui::set_low_battery();
 			next_measure = now + TICK_MS;
 		}
@@ -284,24 +296,20 @@ static void app_loop()
 			next_measure = now + TICK_MS;
 		}
 
-		ui::refresh(); // exactly one panel refresh per iteration, whatever happened
+		was_low = bat.low;
+
+		// The one place the panel is committed. It paints only when a *displayed* value changed --
+		// set_sensor() and set_battery() dedup on what the screen actually shows -- so most passes
+		// end here without touching the e-paper. That is deliberate and it is load-bearing: a
+		// refresh costs ~3 mAs, and a still room gets one per five minutes rather than ten.
+		ui::refresh();
 
 		// Whichever mode we are in has exactly one deadline. A deadline already in the past
-		// makes wait_until() return at once, which is how leaving the menu gets its reading
+		// makes wait() return at once, which is how leaving the menu gets its reading
 		// without a second code path; the iteration that follows always pushes next_measure,
 		// so this cannot spin.
 		const int64_t wake_at = menu_active ? menu::deadline_ms() : next_measure;
 
-		/* The console used to be powered down by hand here: an enabled UARTE holds the HFCLK on
-		 * (~650 uA against a ~60 uA floor), and this was the one place that knew we were about to
-		 * sleep. It only ever worked in a build where nothing else logged -- the Matter one writes
-		 * to the console from the CHIP and OpenThread threads while we wait here, so the suspend
-		 * could not be applied there at all.
-		 *
-		 * It is gone. CONFIG_PM_DEVICE_RUNTIME (conf/airink_hw.conf) has the UARTE driver suspend
-		 * itself after every line and resume for the next, which is both finer-grained and correct
-		 * in every build. Measured with full CHIP logging: idle floor ~705 uA before, ~62 uA after.
-		 */
 		e = wait(wake_at);
 
 		if (e != button::Event::None)

@@ -1,5 +1,33 @@
 # AirInk — Power Analysis
 
+> ## Read this first — where it stands today (2026-07-14, Matter over Thread, measured)
+>
+> ```
+> CO2 read (1x / 5 min)   73.1 mAs   ~70 %      <- the device, essentially
+> idle floor (63 uA)      ~24 mAs    ~23 %
+> e-paper (1-3 refreshes)  9.1 mAs    ~9 %
+> Thread radio             1.1 mAs    ~1 %
+> T+RH reads (10x)         1.5 mAs    ~1 %
+>                         ~105 mAs / 5 min  ->  350 uA  ->  ~118 days @ 1000 mAh
+> ```
+>
+> **The CO₂ read is 70 % of the device**, and its 73 mAs is physics — single-shot is already the
+> SCD41's lowest-duty mode. The only lever is how often it runs: every 10 min → ~187 days, every
+> 15 min → ~231 days. Everything else has been chased down and is spent.
+>
+> **Two rig rules, both learned by publishing wrong numbers:** an attached J-Link adds **~155 µA**,
+> and a power-cycle inside the measurement window puts a boot in it (an extra CO₂ read + a Thread
+> re-attach) which reads as a regression that is not there. Measure a settled device, probe out.
+>
+> **This document is a chronology, not a reference.** The chapters below are in the order they were
+> written, and the later ones correct the earlier ones — twice by disproving something stated here as
+> fact. Nothing has been deleted, because being wrong in a traceable way is the point. If you only
+> want the current numbers, you have just read them.
+
+---
+
+# Chapter 1 — the isolation campaign (superseded in its idle figures, sound in its component charges)
+
 Autonomous measurement campaign on the Nordic PPK2 (source 3.7 V on the battery
 pins) via SWD-flashed isolation firmwares (`bench/power_test.cpp`). Each consumer was
 measured on its own so the numbers are attributable rather than guessed.
@@ -8,6 +36,11 @@ measured on its own so the numbers are attributable rather than guessed.
 > which adds a **constant ~165–183 µA** to the idle floor. All *active* charges are
 > measured *above baseline* and are therefore offset-immune. For the battery model
 > the **true idle (60 µA, measured earlier with no J-Link)** is used.
+>
+> *(Later: that 60 µA was measured on firmware whose button interrupt was silently disabled. The
+> real floor is ~63 µA — see the last two chapters. The component charges in this chapter, though,
+> have held up: the CO₂ read really is ~70 mAs and the panel really is ~3 mAs, which is exactly what
+> the two later chapters had to rediscover the hard way.)*
 
 ---
 

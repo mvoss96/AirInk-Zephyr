@@ -94,6 +94,21 @@ namespace
 	// Survives a failed conversion, so a hiccup neither zeroes the gauge nor flaps the
 	// latch. Zero-initialized: at boot the first successful read fills it in.
 	battery::State state;
+	bool pct_seeded;
+
+	/* Deadband on the reported percentage. The gauge dithers by +-1 pp and no amount of
+	 * smoothing removes it: the ADC's least significant bit is ~3.5 mV and the Li-Ion curve
+	 * is ~2 mV per percent, so two adjacent codes can already be two different percentages.
+	 * Filtering the millivolts (which we do) narrows the noise but cannot make the quantiser
+	 * coarser than itself.
+	 *
+	 * It is not a cosmetic problem. set_battery() dedups on the percentage, so every dither
+	 * is a *changed displayed value* -- and therefore a full e-paper refresh, ~3 mAs, for a
+	 * number that did not really move. At 2 pp the deadband is wider than the dither and
+	 * narrower than anything a user would notice missing; a genuine drift crosses it within
+	 * a percent and is then reported in full.
+	 */
+	constexpr int PCT_DEADBAND = 2;
 
 } // namespace
 
@@ -158,7 +173,19 @@ battery::State battery::read()
 	// voltages so the bolt appears at once instead of after the EMA catches up. This
 	// is the only use of the internal channel; its voltage goes no further.
 	state.charging = (int_raw - ext_raw) > CHARGE_DETECT_MV;
-	state.pct = mv_to_percent(ext_mv_ema.update(ext_raw));
+
+	// Signed, because the comparison is what the deadband is: an unsigned `state.pct - 1` at
+	// 0 % would wrap to 255 and the gauge would stick there forever.
+	const int fresh_pct = mv_to_percent(ext_mv_ema.update(ext_raw));
+	if (!pct_seeded)
+	{
+		state.pct = (uint8_t)fresh_pct;
+		pct_seeded = true;
+	}
+	else if (fresh_pct >= (int)state.pct + PCT_DEADBAND || fresh_pct <= (int)state.pct - PCT_DEADBAND)
+	{
+		state.pct = (uint8_t)fresh_pct;
+	}
 
 	if (state.charging || state.pct >= LOW_EXIT_PCT)
 	{

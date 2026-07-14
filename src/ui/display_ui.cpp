@@ -100,7 +100,7 @@ namespace
 	lv_obj_t *sensor_root, *co2_value, *hum_value, *temp_value;
 	lv_obj_t *error_root, *err_title_lbl, *err_detail_lbl;
 	lv_obj_t *lowbat_root, *lowbat_fill, *lowbat_pct_lbl;
-	lv_obj_t *reset_root, *reset_seconds_lbl;
+	lv_obj_t *reset_root;
 	lv_obj_t *menu_root, *menu_cursor;
 	lv_obj_t *menu_item[(int)ui::Menu::Count];
 
@@ -152,7 +152,6 @@ namespace
 	int last_batt_pct = -1;
 	int last_link = -1;
 	int last_lowbat_pct = -1;
-	int last_reset_seconds = -1;
 	int last_menu_sel = -1;
 	int last_calib_pct = -1;
 
@@ -898,7 +897,14 @@ void ui::set_low_battery()
 		return; // same value already on the widgets
 	}
 
-	const int pct = (last_batt_pct < 0) ? 0 : last_batt_pct;
+	// Clamped here as well as in set_battery(), and not only out of caution: without the upper
+	// bound in view the compiler must assume a full int and warns that "%d" may not fit in buf
+	// (-Wformat-truncation). Stating the range is cheaper than silencing the warning.
+	int pct = (last_batt_pct < 0) ? 0 : last_batt_pct;
+	if (pct > 100)
+	{
+		pct = 100;
+	}
 
 	// Fill the ~122px interior of the big frame proportionally.
 	lv_obj_set_width(lowbat_fill, (lv_coord_t)(pct * 122 / 100));
