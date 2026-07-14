@@ -16,7 +16,7 @@
  *
  * The loop owns the panel: LVGL is not thread-safe, and nothing outside run()'s thread
  * may call ui::. A caller that wants to change what is on screen leaves the value where the
- * loop can pick it up (see net::set_link()).
+ * loop can pick it up (see net::set_thread_connected()).
  */
 namespace app
 {

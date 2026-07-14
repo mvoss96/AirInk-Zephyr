@@ -4,7 +4,7 @@
 
 #include "sensors/battery.hpp"
 #include "sensors/scd41.hpp"
-#include "ui/display_ui.hpp" // ui::TempUnit, ui::Link
+#include "ui/display_ui.hpp" // ui::TempUnit
 
 /** @file
  * The device's edge to a network, whichever network that is.
@@ -115,12 +115,10 @@ namespace net
 	void set_commissioned(bool on_fabric);
 	bool commissioned();
 
-	/** The radio state for the status bar. Written from the network's threads; the loop reads it
-	 * back with link() and puts it on the panel on its next pass -- the panel belongs to the
-	 * loop's thread, so the indicator may lag a connection by one cycle, which is the same latency
-	 * an e-paper refresh imposes anyway. */
-	void set_link(ui::Link state);
-	ui::Link link();
+	/** Whether the device currently has a Thread link. Written from the network's threads on
+	 * connectivity events; poll() gates the signal bars on it, so a lost link empties the status
+	 * bar on the loop's next pass rather than leaving stale bars standing on the panel. */
+	void set_thread_connected(bool up);
 
 	/** Forwarders for the gestures. Each calls its hook, if there is one, and does nothing
 	 * otherwise -- so the loop and the menu never test for the network's presence themselves. */

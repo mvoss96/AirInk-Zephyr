@@ -15,8 +15,12 @@ namespace
 
 	// Written by the network's threads, read by the loop. A plain word store is atomic on this
 	// core, and a stale read costs nothing worse than one cycle of a stale indicator.
-	ui::Link link_state = ui::Link::None;
+	bool thread_up;
 	bool is_commissioned;
+
+	/* What the status bar last drew, kept here because the quantizer's hysteresis needs the level
+	 * being held -- and this is its only caller. -1 = the corner is empty. */
+	int prev_bars = -1;
 
 	/* What was last sent, quantized to what a person could tell apart. See publish_reading(). */
 	int32_t pub_temp_x100;
@@ -65,14 +69,9 @@ bool net::commissioned()
 	return is_commissioned;
 }
 
-void net::set_link(ui::Link state)
+void net::set_thread_connected(bool up)
 {
-	link_state = state;
-}
-
-ui::Link net::link()
-{
-	return link_state;
+	thread_up = up;
 }
 
 void net::open_pairing()
@@ -165,34 +164,46 @@ static void pull_unit()
 	prefs::adopt(prefs::Unit, (int32_t)u);
 }
 
-/** Ask the radio how well it is heard, for the bars in the status bar.
+/** Ask the radio how well it is heard, and put the answer on the status bar as 0..4 bars.
  *
- * Before the device has a parent to be a child of, there is nothing to ask and the status bar keeps
- * the token it already has.
+ * Everything short of a measured, joined link comes out as -1 -- no radio in this build, not
+ * joined, or joined with no parent to be a child of yet -- and -1 draws nothing: an empty corner is
+ * the honest amount to say, and four hollow outlines would claim "attached, no signal", a real and
+ * much worse state.
+ *
+ * The quantizer's hysteresis (ui::quantize_signal_bars) is fed from here, because this is its only
+ * caller: a link parked on a threshold must not flip the panel back and forth at ~3 mAs a go.
  */
 static void pull_signal()
 {
-	if (!hooks.link_rssi)
+	// A lost link empties the corner. Anything less final -- one failed RSSI read on a link that is
+	// still up -- leaves the bars standing: the last measurement is still the best answer there is,
+	// and flapping the panel over a hiccup would cost ~3 mAs a flap.
+	if (!thread_up)
 	{
+		prev_bars = -1;
+		ui::set_signal_bars(-1);
 		return;
 	}
 
 	int8_t rssi;
-	if (!hooks.link_rssi(&rssi))
+	if (!hooks.link_rssi || !hooks.link_rssi(&rssi))
 	{
 		return;
 	}
 
-	// Log only when the bars actually move. The dBm behind them drifts a little every half minute and
-	// saying so every time would drown the log in noise -- but the moment the panel changes is worth
-	// a line, because that is the line you read when you are deciding where to put the device.
-	const int before = ui::signal_bars();
-	ui::set_signal(rssi);
-	const int after = ui::signal_bars();
-	if (after != before)
+	const int bars = ui::quantize_signal_bars(rssi, prev_bars);
+
+	// Log only when the bars actually move. The dBm behind them drifts a little every half minute
+	// and saying so every time would drown the log in noise -- but the moment the panel changes is
+	// worth a line, because that is the line you read when you are deciding where to put the device.
+	if (bars != prev_bars)
 	{
-		printk("[SIG] %d dBm -> %d bars\n", rssi, after);
+		printk("[SIG] %d dBm -> %d bars\n", rssi, bars);
 	}
+
+	prev_bars = bars;
+	ui::set_signal_bars(bars);
 }
 
 void net::poll()

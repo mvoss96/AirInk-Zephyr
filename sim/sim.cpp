@@ -119,13 +119,9 @@ int main(int argc, char **argv)
 		std::printf("ui::init failed\n");
 		return 1;
 	}
-	// The radio state the status bar would really show: Thread once paired, nothing at all in a
-	// build that has no radio to report on.
-	const ui::Link link = matter ? ui::Link::ThreadConnected : ui::Link::None;
-
-	// Every frame: stage the changes, then one refresh() commits (as on device).
+	// Every frame: stage the changes, then one refresh() commits (as on device). No signal bars
+	// yet: at boot nothing has been measured, and the status bar's corner stays honestly empty.
 	ui::set_battery(87, /*charging=*/true); // boot: show the charging bolt
-	ui::set_link(link);
 	ui::refresh();
 	snapshot("boot");
 
@@ -138,29 +134,30 @@ int main(int argc, char **argv)
 
 	// The signal bars, every level, because the whole point of them is being read at a glance from
 	// across a room -- and one bar has to look unmistakably unlike four. Only the radio build has a
-	// mesh to measure; the other keeps its "--".
+	// mesh to measure; the other's corner stays empty. The counts are what net's quantizer would
+	// hand over for ~-55, -70, -80, -90 and -100 dBm.
 	if (matter)
 	{
 		const struct
 		{
-			int rssi;
+			int bars;
 			const char *name;
 		} levels[] = {
-			{-55, "signal_4"},	// next to the router
-			{-70, "signal_3"},	//
-			{-80, "signal_2"},	//
-			{-90, "signal_1"},	// on the edge
-			{-100, "signal_0"}, // attached, and barely
+			{4, "signal_4"}, // next to the router
+			{3, "signal_3"}, //
+			{2, "signal_2"}, //
+			{1, "signal_1"}, // on the edge
+			{0, "signal_0"}, // attached, and barely
 		};
 		for (const auto &l : levels)
 		{
 			g_tick_ms += 100;
-			ui::set_signal(l.rssi);
+			ui::set_signal_bars(l.bars);
 			ui::refresh();
 			snapshot(l.name);
 		}
 		g_tick_ms += 100;
-		ui::set_signal(-55); // back to a healthy link for the screens that follow
+		ui::set_signal_bars(4); // back to a healthy link for the screens that follow
 		ui::refresh();
 	}
 
@@ -252,16 +249,16 @@ int main(int argc, char **argv)
 
 	if (matter)
 	{
-		// The Matter screen, both halves. Uncommissioned: something to scan, and the radio is
-		// advertising over BLE. Commissioned: nothing to scan, so the state instead.
+		// The Matter screen, both halves. Uncommissioned: something to scan, no Thread yet, so no
+		// bars. Commissioned: nothing to scan, so the state instead -- and the bars are back.
 		g_tick_ms += 100;
-		ui::set_link(ui::Link::BleAdv);
+		ui::set_signal_bars(-1);
 		ui::show_matter(/*commissioned=*/false);
 		ui::refresh();
 		snapshot("matter_pairing");
 
 		g_tick_ms += 100;
-		ui::set_link(link);
+		ui::set_signal_bars(4);
 		ui::show_matter(/*commissioned=*/true);
 		ui::refresh();
 		snapshot("matter_connected");

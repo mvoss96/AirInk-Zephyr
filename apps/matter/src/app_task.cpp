@@ -158,23 +158,18 @@ void PublishBattery(const battery::State &bat)
 	PlatformMgr().UnlockChipStack();
 }
 
-/* Runs on the CHIP thread. Only records the radio state; the status bar belongs to AirInk's
- * thread, which picks the value up on its next cycle. */
+/* Runs on the CHIP thread. Only records the state; the status bar belongs to AirInk's thread,
+ * which picks the value up on its next cycle.
+ *
+ * Thread connectivity is the ONE event the panel cares about: it gates the signal bars, and losing
+ * it is what empties them. The BLE advertising events used to be reported too, mapped through a
+ * five-state Link enum -- for a "BLE.." status token that was deleted long before the enum was.
+ * Nothing drew them; now nothing reports them. */
 void MatterEventHandler(const ChipDeviceEvent *event, intptr_t)
 {
-	switch (event->Type) {
-	case DeviceEventType::kCHIPoBLEAdvertisingChange:
-		::net::set_link(event->CHIPoBLEAdvertisingChange.Result == kActivity_Started
-				      ? ui::Link::BleAdv
-				      : ui::Link::None);
-		break;
-	case DeviceEventType::kThreadConnectivityChange:
-		::net::set_link(event->ThreadConnectivityChange.Result == kConnectivity_Established
-				      ? ui::Link::ThreadConnected
-				      : ui::Link::ThreadJoining);
-		break;
-	default:
-		break;
+	if (event->Type == DeviceEventType::kThreadConnectivityChange) {
+		::net::set_thread_connected(event->ThreadConnectivityChange.Result ==
+					    kConnectivity_Established);
 	}
 }
 

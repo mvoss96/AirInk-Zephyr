@@ -18,25 +18,6 @@
 namespace ui
 {
 
-	/** What the radio is doing.
-	 *
-	 * The status bar draws exactly one of these -- ThreadConnected, as signal bars. Everything else
-	 * means "no bars", and the bar is left empty rather than filled with a word.
-	 *
-	 * It used to print a token for each: "BLE..", "TH", "--". They are gone. "TH" told you which
-	 * protocol the device speaks, which is not something anyone standing in front of a CO2 monitor
-	 * wants to know, and the pairing screen says the BLE part properly and in words. The states
-	 * themselves stay because the radio really is in them and app_task reports them.
-	 */
-	enum class Link
-	{
-		None,
-		BleAdv,
-		BleConnected,
-		ThreadJoining,
-		ThreadConnected
-	};
-
 	/** How many entries a menu may have. The panel decides this, not the menu: five 44 px rows are
 	 * what fits above the hint line, and show_list() refuses anything longer rather than drawing over
 	 * it. See the static_assert in display_ui.cpp. */
@@ -104,15 +85,6 @@ namespace ui
 	 */
 	void set_battery(uint8_t pct, bool charging);
 
-	/** Stage the radio state, which the status bar carries across every view.
-	 *
-	 * Nothing is drawn for it except signal bars, and those only on a joined Thread link that has
-	 * been measured (set_signal). Any other state empties that corner of the bar.
-	 *
-	 * @param state radio state
-	 */
-	void set_link(Link state);
-
 	/** Show the sensor view, with whatever readings it already holds.
 	 *
 	 * The one view the device returns to, so this is also how a menu, an error or the
@@ -145,29 +117,20 @@ namespace ui
 	/** The unit currently painted. The menu asks, so that a hold can toggle it. */
 	TempUnit temp_unit_shown();
 
-	/** How strong the Thread link is, so the status bar can show bars instead of a bare "TH".
+	/** Stage the signal bars in the status bar: how well the mesh hears this device.
 	 *
-	 * "TH" answers a question nobody has once the device is joined. The one they do have -- is it
-	 * standing somewhere it can actually reach the mesh? -- needs a strength, and this is it.
+	 * The panel's entire vocabulary for the radio. -1 draws nothing at all -- not joined, or joined
+	 * and not yet measured -- because an empty corner is the honest amount to say, and four hollow
+	 * outlines would claim "attached with no signal", a real and much worse state. 0 draws exactly
+	 * that state: four hollow outlines. 1..4 fill that many.
 	 *
-	 * The bars only appear on a joined Thread link (see set_link), and only once this has been called
-	 * at least once: four hollow bars mean "attached with no signal", which must not be confused with
-	 * "not measured yet".
+	 * Who earns how many bars is the caller's judgement (net quantizes, with hysteresis, from the
+	 * RSSI its hook reports); the panel just draws the count and dedups on it -- an unchanged count
+	 * costs no e-paper refresh.
 	 *
-	 * Deduped and hysteretic (ui::quantize_signal_bars): a link parked on a threshold does not get to
-	 * flip the panel back and forth at ~3 mAs a go.
-	 *
-	 * @param rssi_dbm average RSSI to the parent router, in dBm (negative)
+	 * @param bars -1 to clear the corner, else 0..4
 	 */
-	void set_signal(int rssi_dbm);
-
-	/** How many bars are drawn, 0..4, or -1 if nothing has been measured yet.
-	 *
-	 * The hysteresis lives in here, so this is the only place that knows whether a new reading
-	 * actually moved the display -- which is what the log wants to say, and the only thing worth
-	 * saying about a number that drifts by a dB every half minute.
-	 */
-	int signal_bars();
+	void set_signal_bars(int bars);
 
 	/** Select the error view and stage its text.
 	 *

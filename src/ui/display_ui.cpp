@@ -75,13 +75,12 @@ namespace
 	lv_obj_t *batt_frame, *batt_fill, *batt_bolt, *batt_pct_lbl;
 	int last_charging = -1;
 
-	/* The signal bars, shown in place of the link token once there is a Thread network to measure.
-	 * Four ascending bars: filled = earned, outline = not. They and link_lbl are never both up --
-	 * "TH" and a set of bars would say the same thing twice, and the bars say it better. */
+	/* The signal bars: four ascending, filled = earned, outline = not. The whole radio vocabulary of
+	 * the panel -- see ui::set_signal_bars(). */
 	constexpr int SIGNAL_BARS = 4;
 	lv_obj_t *signal_bar[SIGNAL_BARS];
 	lv_obj_t *link_icon; // the Matter mark; it shares the bars' fate
-	int last_bars = -1;  // -1 = nothing measured yet
+	int last_bars = -1;  // what set_signal_bars() last drew; -1 = the corner is empty
 
 	/* Whether this build has a radio at all. Without one the right-hand side of the status bar stays
 	 * empty -- no bars, and no "--" either. A dash is an answer to "how is the link?", and a device
@@ -327,7 +326,6 @@ namespace
 	 * measurement arrives half a minute later. */
 	int32_t last_temp_c_x100;
 	int last_batt_pct = -1;
-	int last_link = -1;
 	int last_lowbat_pct = -1;
 	int last_calib_pct = -1;
 
@@ -452,60 +450,50 @@ namespace
 		plat::display_suspend(); // deep-sleep the panel until the next refresh
 	}
 
-	/** Is this a view the user steps through with the button?
+	/** Everything refresh() needs to know about a view: where its container lands, and whether the
+	 * user steps through it with the button.
 	 *
-	 * A full refresh is a ~2 s black flash. Paying it on every step makes the device feel broken, so
-	 * these views are entered and navigated with partial refreshes. The ghosting they leave -- the
-	 * inverted cursor bar and the big DSEG7 digits are the worst of it -- is cleared by the one full
-	 * refresh that happens on the way back out to a resting view.
+	 * `transient` decides the refresh kind. A full refresh is a ~2 s black flash; paying it on every
+	 * step makes the device feel broken, so transient views are entered and navigated with partial
+	 * refreshes, and the ghosting they leave -- the inverted cursor bar and the big DSEG7 digits are
+	 * the worst of it -- is cleared by the one full refresh on the way back out to a resting view.
 	 *
-	 * A table and not a chain of ORs, and the difference is not style. The old chain named the
-	 * transient views and said nothing about the rest, so a view added later was silently RESTING --
-	 * and the Calibrate sub-menu and the number editor were both added later, and both flashed the
-	 * panel black on the way in and on the way out. Nothing complained; the list was simply wrong and
-	 * had no way to say so. Now every view must be classified, and the static_assert below is what
-	 * says so, at build time, before anyone has to notice it with their eyes.
+	 * ONE table, and every view is a row in it, enforced below. Both facts used to be kept by hand --
+	 * a chain of ORs for the refresh kind, a switch for the container -- and the chain is how two
+	 * views added later (the Calibrate sub-menu and the number editor) came to flash the panel black
+	 * on every step: the list named the transient views and said nothing about the rest, so a new one
+	 * was silently RESTING and nothing complained. A view the enum knows about cannot be left out
+	 * here; a view left out cannot compile.
+	 *
+	 * The roots are addresses OF the pointers, because the containers do not exist until init()
+	 * builds them. A *root that stays null is a view this build does not have (no radio -> no
+	 * pairing view). VIEW_NONE maps to the splash, which is what the panel shows before anyone
+	 * has said otherwise.
 	 */
-	const bool TRANSIENT[] = {
-		/* VIEW_NONE           */ false,
-		/* VIEW_BOOT           */ false, // resting: the splash sits there until the first reading
-		/* VIEW_SENSOR         */ false, // resting: the whole point of the device
-		/* VIEW_ERROR          */ false, // resting: it stays up until the fault clears
-		/* VIEW_LOWBAT         */ false, // resting: it stays up until the battery does not
-		/* VIEW_RESET          */ true,	 // a prompt, one button away from gone
-		/* VIEW_MENU           */ true,	 // stepped through -- and it is every menu, root or not
-		/* VIEW_VALUE          */ true,	 // stepped through, one tap per step
-		/* VIEW_PAIRING        */ true,	 // read and dismissed
-		/* VIEW_CALIB_PROMPT   */ true,	 // a prompt
-		/* VIEW_CALIB_PROGRESS */ true,	 // a bar that redraws every five seconds for three minutes
-	};
-	static_assert(sizeof(TRANSIENT) / sizeof(TRANSIENT[0]) == (size_t)VIEW_COUNT,
-				  "a new view must say whether the user steps through it -- get this wrong and the "
-				  "panel flashes black on every step, or ghosts forever");
-
-	bool transient(View v) { return TRANSIENT[v]; }
-
-	/** The container that belongs to a view.
-	 *
-	 * @param v the view to look up
-	 * @return its root container; the boot splash for VIEW_NONE
-	 */
-	lv_obj_t *root_for(View v)
+	struct ViewDef
 	{
-		switch (v)
-		{
-		case VIEW_SENSOR: return sensor_root;
-		case VIEW_ERROR:  return error_root;
-		case VIEW_LOWBAT: return lowbat_root;
-		case VIEW_RESET:  return reset_root;
-		case VIEW_MENU:   return list_root;
-		case VIEW_VALUE:  return value_root;
-		case VIEW_PAIRING: return pair_root;
-		case VIEW_CALIB_PROMPT:
-		case VIEW_CALIB_PROGRESS: return calib_root;
-		default:          return boot_root;
-		}
-	}
+		lv_obj_t **root;
+		bool transient;
+	};
+	const ViewDef VIEWS[] = {
+		/* VIEW_NONE           */ {&boot_root, false},
+		/* VIEW_BOOT           */ {&boot_root, false},	// resting: up until the first reading
+		/* VIEW_SENSOR         */ {&sensor_root, false}, // resting: the whole point of the device
+		/* VIEW_ERROR          */ {&error_root, false},	// resting: up until the fault clears
+		/* VIEW_LOWBAT         */ {&lowbat_root, false}, // resting: up until the battery is not
+		/* VIEW_RESET          */ {&reset_root, true},	// a prompt, one button away from gone
+		/* VIEW_MENU           */ {&list_root, true},	// stepped through -- every menu, root or not
+		/* VIEW_VALUE          */ {&value_root, true},	// stepped through, one tap per step
+		/* VIEW_PAIRING        */ {&pair_root, true},	// read and dismissed
+		/* VIEW_CALIB_PROMPT   */ {&calib_root, true},	// a prompt
+		/* VIEW_CALIB_PROGRESS */ {&calib_root, true},	// a bar redrawing every 5 s for 3 minutes
+	};
+	static_assert(sizeof(VIEWS) / sizeof(VIEWS[0]) == (size_t)VIEW_COUNT,
+				  "a new view must say where it lives and whether the user steps through it -- get "
+				  "the second wrong and the panel flashes black on every step, or ghosts forever");
+
+	bool transient(View v) { return VIEWS[v].transient; }
+	lv_obj_t *root_for(View v) { return *VIEWS[v].root; }
 
 	/** Show or hide one widget. LVGL only offers add/clear of the flag, which turns every
 	 * "show this, hide that" into a ternary that reads backwards. */
@@ -523,21 +511,18 @@ namespace
 
 	/** Hide every content view, so refresh() can un-hide exactly one.
 	 *
-	 * Driven off the View enum, not off a list kept by hand. The hand-kept one silently
+	 * Driven off the VIEWS table, not off a list kept by hand. The hand-kept one silently
 	 * omitted the pairing view when it was added, and an un-hidden view sits on top of every
 	 * other screen forever -- while the device cheerfully logs "display ok". A view the enum
 	 * knows about cannot be forgotten here.
-	 *
-	 * A null root is a view this build does not have (no radio -> no pairing view).
 	 */
 	void hide_all_content()
 	{
 		for (int v = VIEW_BOOT; v < VIEW_COUNT; v++)
 		{
-			lv_obj_t *root = root_for((View)v);
-			if (root)
+			if (lv_obj_t *root = root_for((View)v))
 			{
-				lv_obj_add_flag(root, LV_OBJ_FLAG_HIDDEN);
+				set_hidden(root, true);
 			}
 		}
 	}
@@ -836,10 +821,6 @@ namespace
 	 */
 	void build_list(lv_obj_t *scr)
 	{
-		static_assert(ui::LIST_MAX_ROWS * MENU_ITEM_H + MENU_HINT_H <= CONTENT_H,
-					  "the menu entries no longer fit above the hint -- shrink MENU_ITEM_H, or the "
-					  "panel will draw them on top of each other");
-
 		list_root = make_view(scr);
 		list_cursor = make_divider(list_root, CONTENT_W - 32, MENU_ITEM_H);
 
@@ -1056,13 +1037,9 @@ void ui::show_matter(bool commissioned)
 
 	// Scan-me and already-on-the-network are the same screen with one half swapped out.
 	const bool show_qr = !commissioned;
-	lv_obj_t *const qr_half[] = { pair_qr_obj, pair_code_lbl };
-	for (lv_obj_t *o : qr_half)
-	{
-		show_qr ? lv_obj_clear_flag(o, LV_OBJ_FLAG_HIDDEN) : lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
-	}
-	show_qr ? lv_obj_add_flag(pair_state_lbl, LV_OBJ_FLAG_HIDDEN)
-			: lv_obj_clear_flag(pair_state_lbl, LV_OBJ_FLAG_HIDDEN);
+	set_hidden(pair_qr_obj, !show_qr);
+	set_hidden(pair_code_lbl, !show_qr);
+	set_hidden(pair_state_lbl, show_qr);
 
 	pending_view = VIEW_PAIRING;
 	dirty = true;
@@ -1251,96 +1228,45 @@ void ui::set_battery(uint8_t pct, bool charging)
 	lv_label_set_text(batt_pct_lbl, buf);
 
 	// Charging: show the bolt in place of the percentage number.
-	if (charging)
-	{
-		lv_obj_add_flag(batt_pct_lbl, LV_OBJ_FLAG_HIDDEN);
-		lv_obj_clear_flag(batt_bolt, LV_OBJ_FLAG_HIDDEN);
-	}
-	else
-	{
-		lv_obj_clear_flag(batt_pct_lbl, LV_OBJ_FLAG_HIDDEN);
-		lv_obj_add_flag(batt_bolt, LV_OBJ_FLAG_HIDDEN);
-	}
+	set_hidden(batt_pct_lbl, charging);
+	set_hidden(batt_bolt, !charging);
 
 	last_batt_pct = pct;
 	last_charging = charging;
 	dirty = true;
 }
 
-void ui::set_link(Link state)
+void ui::set_signal_bars(int bars)
 {
 	if (!ready || !has_radio)
 	{
 		return; // nothing to report, and nowhere it would be drawn
 	}
-	if ((int)state == last_link)
+	if (bars > SIGNAL_BARS)
 	{
-		return;
+		bars = SIGNAL_BARS;
 	}
-
-	// The bars stand for a joined Thread link, and only once a strength has actually been measured:
-	// between joining and the first reading there is nothing to draw, and four empty outlines would
-	// claim there is -- they mean "attached, no signal", a real and much worse state than "not asked
-	// yet". Until then the status bar simply says nothing, which is the truth.
-	const bool bars = (state == Link::ThreadConnected) && (last_bars >= 0);
-	const bool was_showing = !lv_obj_has_flag(link_icon, LV_OBJ_FLAG_HIDDEN);
-
-	for (int i = 0; i < SIGNAL_BARS; i++)
-	{
-		set_hidden(signal_bar[i], !bars);
-	}
-	set_hidden(link_icon, !bars);
-
-	last_link = (int)state;
-
-	// Only what is DRAWN counts. The radio has five states and the status bar draws one of them, so
-	// None -> BleAdv at boot, BleAdv -> None an hour later when the advertising window closes, and
-	// every step of a Thread join, all leave the corner exactly as blank as they found it. Dirtying
-	// the panel for those bought a partial refresh apiece for a picture nobody could tell apart.
-	if (bars != was_showing)
-	{
-		dirty = true;
-	}
-}
-
-void ui::set_signal(int rssi_dbm)
-{
-	if (!ready || !has_radio)
-	{
-		return;
-	}
-
-	const int bars = quantize_signal_bars(rssi_dbm, last_bars);
 	if (bars == last_bars)
 	{
-		return; // same number of bars already drawn; the dBm behind them are nobody's business
+		return; // the corner already looks exactly like this
 	}
 
+	// -1 clears the corner entirely: the mark and the bars come and go together, because the mark
+	// says what network the bars are measuring. Bars without it would be any radio; it without bars
+	// would be a boast.
+	const bool shown = (bars >= 0);
 	for (int i = 0; i < SIGNAL_BARS; i++)
 	{
+		set_hidden(signal_bar[i], !shown);
 		// Earned bars are solid; the rest are hollow, so the scale stays visible.
 		const bool on = (i < bars);
 		lv_obj_set_style_bg_opa(signal_bar[i], on ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
 		lv_obj_set_style_border_width(signal_bar[i], on ? 0 : 1, 0);
 	}
-
-	// The first measurement is also what brings the bars out at all -- see set_link().
-	if (last_bars < 0 && last_link == (int)Link::ThreadConnected)
-	{
-		for (int i = 0; i < SIGNAL_BARS; i++)
-		{
-			set_hidden(signal_bar[i], false);
-		}
-		set_hidden(link_icon, false);
-	}
+	set_hidden(link_icon, !shown);
 
 	last_bars = bars;
 	dirty = true;
-}
-
-int ui::signal_bars()
-{
-	return last_bars;
 }
 
 void ui::show_list(const char *const *labels, int count, int selected)

@@ -146,7 +146,6 @@ static battery::State poll_battery()
 {
 	const battery::State bat = battery::read();
 	ui::set_battery(bat.pct, bat.charging);
-	ui::set_link(net::link()); // the radio's threads wrote it; the loop puts it on the panel
 
 	net::publish_battery(bat);
 	return bat;
