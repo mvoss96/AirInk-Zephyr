@@ -8,12 +8,18 @@
 #include "input/button.hpp"
 #include "menu.hpp"
 #include "prefs.hpp"
+#include "ui/quantize.hpp"
 #include "version.hpp"
 
 static constexpr int TICK_MS = 30000;			// How often a measurement cycle runs
 static constexpr uint32_t CO2_EVERY_TICKS = 10; // Every tenth cycle is a full CO2 read; the others are T+RH only
 static uint32_t tick_count;						// cycles since boot, or since the last recalibration
 static uint16_t last_co2_ppm;					// held on screen between the five-minute CO2 reads
+
+/* What was last sent to the network, quantized to what a person could tell apart. See measure(). */
+static int32_t pub_temp_x100;
+static uint16_t pub_hum_x100;
+static bool have_published;
 
 static app::Hooks hooks;
 
@@ -140,12 +146,35 @@ static void measure()
 	ui::show_sensor();
 	ui::set_sensor(r.co2_ppm, r.temp_x100, r.hum_x100);
 
-	// Only a cycle that actually smelled the air is worth forwarding: on the nine cycles
-	// in between, r.co2_ppm is the retained value, and republishing it would claim a
-	// freshness it does not have.
-	if (full_co2 && hooks.reading)
+	/* When to tell the network. Not every tick, and not only every tenth.
+	 *
+	 * Every tenth (with the CO2 read) left a controller up to five minutes behind the panel, which is
+	 * a long time to disagree with the thing on the wall. Every tick fixed that and was MEASURED to
+	 * cost 16.2 mAs per cycle -- +54 uA, 112 days down to 98. Fourteen days for freshness nobody had
+	 * asked for.
+	 *
+	 * So: when the reading actually moves. The panel already decides that -- it deduplicates on what
+	 * it can show -- and a still room moves a tenth of a degree once or twice in five minutes, not ten
+	 * times. The controller now agrees with the panel, and the radio only speaks when there is
+	 * something to say.
+	 *
+	 * The threshold is in Celsius and whole percent, NOT in the unit on the panel: what the network is
+	 * told must not depend on whether somebody set the display to Fahrenheit.
+	 *
+	 * A CO2 read always goes, because it is the one number that is genuinely new on that tick -- and
+	 * the value sent is always the full-resolution one. The quantization decides WHEN to speak, never
+	 * WHAT to say.
+	 */
+	const int32_t t_q = ui::quantize_temp_x100(r.temp_x100);
+	const uint16_t h_q = ui::quantize_hum_x100(r.hum_x100);
+	const bool moved = !have_published || t_q != pub_temp_x100 || h_q != pub_hum_x100;
+
+	if (hooks.reading && (full_co2 || moved))
 	{
 		hooks.reading(r);
+		pub_temp_x100 = t_q;
+		pub_hum_x100 = h_q;
+		have_published = true;
 	}
 
 	tick_count++;
