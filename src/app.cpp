@@ -78,17 +78,6 @@ static button::Event wait(int64_t deadline_ms)
 	return button::wait_until(0); // a gesture if k_poll found one; None otherwise
 }
 
-/** Adopt a unit the controller set. The loop is the bridge between net and prefs, so the two
- * never call each other; prefs dedups, logs, and never echoes back to the network (adopt). */
-static void pull_unit()
-{
-	ui::TempUnit u;
-	if (net::unit_from_network(&u))
-	{
-		prefs::adopt(prefs::Unit, (int32_t)u);
-	}
-}
-
 /** The main app loop.
  * @param menu_active true when run() opened the boot onboarding screen (menu::enter_matter()) --
  *                    the loop then starts inside the menu, exactly as if the user had opened it */
@@ -106,8 +95,15 @@ static void app_loop(bool menu_active)
 		ui::set_battery(bat.pct, bat.charging);
 		net::publish_battery(bat);
 
-		net::poll_signal(); // what the network has to say back...
-		pull_unit();		// ...and what it wants the panel to show
+		net::poll_signal();
+
+		// Adopt a unit the controller set. The loop is the bridge between net and prefs, so the
+		// two never call each other; prefs dedups, logs, and never echoes back (adopt).
+		ui::TempUnit u;
+		if (net::unit_from_network(&u))
+		{
+			prefs::adopt(prefs::Unit, (int32_t)u);
+		}
 
 		if (bat.low)
 		{
