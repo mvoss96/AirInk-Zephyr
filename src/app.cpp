@@ -37,8 +37,7 @@ static void measure()
 	// truncates toward zero, so -0.5 C prints as "0.5". The sign goes in front of the whole thing.
 	const int32_t t_abs = (r.temp_x100 < 0) ? -r.temp_x100 : r.temp_x100;
 	printk("%s CO2 %u ppm  T %s%d.%02d C  RH %d.%02d %%\n", full_co2 ? "[CO2]" : "[RHT]", r.co2_ppm,
-		   (r.temp_x100 < 0) ? "-" : "", t_abs / 100, t_abs % 100, r.hum_x100 / 100,
-		   r.hum_x100 % 100);
+		   (r.temp_x100 < 0) ? "-" : "", t_abs / 100, t_abs % 100, r.hum_x100 / 100, r.hum_x100 % 100);
 
 	ui::show_sensor();
 	ui::set_sensor(r.co2_ppm, r.temp_x100, r.hum_x100);
@@ -67,10 +66,8 @@ static button::Event wait(int64_t deadline_ms)
 	if (deadline_ms > now)
 	{
 		struct k_poll_event ev[2];
-		k_poll_event_init(&ev[0], K_POLL_TYPE_MSGQ_DATA_AVAILABLE, K_POLL_MODE_NOTIFY_ONLY,
-						  button::queue());
-		k_poll_event_init(&ev[1], K_POLL_TYPE_SEM_AVAILABLE, K_POLL_MODE_NOTIFY_ONLY,
-						  &supply_changed);
+		k_poll_event_init(&ev[0], K_POLL_TYPE_MSGQ_DATA_AVAILABLE, K_POLL_MODE_NOTIFY_ONLY, button::queue());
+		k_poll_event_init(&ev[1], K_POLL_TYPE_SEM_AVAILABLE, K_POLL_MODE_NOTIFY_ONLY, &supply_changed);
 		k_poll(ev, ARRAY_SIZE(ev), K_MSEC(deadline_ms - now));
 	}
 
@@ -81,9 +78,7 @@ static button::Event wait(int64_t deadline_ms)
 	return button::wait_until(0); // a gesture if k_poll found one; None otherwise
 }
 
-/** Read the battery, stage it, tell the network. Every pass starts here -- which is also how the
- * Matter build refreshes net::commissioned() (it rides in the battery hook), and how the
- * onboarding screen below notices a commissioner without a gesture. */
+/** Read the battery, stage it, tell the network. Every pass of every loop starts here. */
 static battery::State poll_battery()
 {
 	const battery::State bat = battery::read();
@@ -121,8 +116,10 @@ static void onboarding()
 
 	while (true)
 	{
-		poll_battery(); // also refreshes net::commissioned(), which is the way out below
+		poll_battery(); // the status bar stays honest while the code is up
 
+		// Kept current by the network's own threads (a fabric delegate on the Matter build);
+		// this loop only has to keep looking.
 		if (net::commissioned())
 		{
 			printk("[MTR] commissioned; on to the readings\n");

@@ -137,10 +137,6 @@ void PublishBattery(const battery::State &bat)
 						     bat.low ? PowerSource::BatChargeLevelEnum::kCritical
 							     : PowerSource::BatChargeLevelEnum::kOk);
 
-	/* Riding along in the one place that already holds the lock on AirInk's thread. Polled, because
-	 * there is no event for a fabric being REMOVED (CHIP only signals kCommissioningComplete); the
-	 * table is the truth, and this runs before the loop acts on any button. */
-	::net::set_commissioned(Server::GetInstance().GetFabricTable().FabricCount() > 0);
 	PlatformMgr().UnlockChipStack();
 }
 
@@ -154,6 +150,22 @@ void MatterEventHandler(const ChipDeviceEvent *event, intptr_t)
 					    kConnectivity_Established);
 	}
 }
+
+/* Fabric membership, event-driven: committed and removed are the only two edges, and the fabric
+ * table calls both on the CHIP thread. (There is no DeviceEventType for a removal in this SDK --
+ * this delegate is what exists instead. Before it, the flag was refreshed as a ride-along in the
+ * battery hook, and the onboarding flow depended on a side effect of a function named "battery".) */
+class FabricDelegate : public chip::FabricTable::Delegate {
+	void OnFabricCommitted(const chip::FabricTable &table, FabricIndex) override
+	{
+		::net::set_commissioned(table.FabricCount() > 0);
+	}
+	void OnFabricRemoved(const chip::FabricTable &table, FabricIndex) override
+	{
+		::net::set_commissioned(table.FabricCount() > 0);
+	}
+};
+FabricDelegate sFabricDelegate;
 
 /* The onboarding codes, fetched once from CHIP. Static because net::set_pairing_codes() does not
  * copy them and the UI holds the pointers for the life of the device. */
@@ -351,8 +363,10 @@ CHIP_ERROR AppTask::StartApp()
 
 	/* Before the thread starts: app::run() reads the codes when it builds the UI, and whether
 	 * there are any is what decides that the menu has a Matter row at all. The fabric table has
-	 * been loaded from NVS by now, so this is the state a reboot comes back to. */
+	 * been loaded from NVS by now, so the seed below is the state a reboot comes back to; the
+	 * delegate keeps it current from there. */
 	FetchOnboardingCodes();
+	Server::GetInstance().GetFabricTable().AddFabricDelegate(&sFabricDelegate);
 	::net::set_commissioned(Server::GetInstance().GetFabricTable().FabricCount() > 0);
 
 	k_thread_create(&sAirInkThread, sAirInkStack, K_THREAD_STACK_SIZEOF(sAirInkStack), AirInkThread,

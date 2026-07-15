@@ -26,7 +26,7 @@ namespace net
 		/** A reading worth telling the network about (publish_reading() decides which). */
 		void (*reading)(const Scd41Reading &r);
 
-		/** The battery, every cycle. The Matter build also refreshes its fabric view here. */
+		/** The battery, every cycle. */
 		void (*battery)(const battery::State &bat);
 
 		/** Drop every network the device is on; the user confirmed it on the panel. */
@@ -72,7 +72,8 @@ namespace net
 	bool has_radio();
 	bool can_factory_reset();
 
-	/** Whether the device is on a fabric. Written from the network's threads. */
+	/** Whether the device is on a fabric. Written from the network's threads -- on the Matter
+	 * build, seeded at boot and then kept current by a fabric-table delegate. */
 	void set_commissioned(bool on_fabric);
 	bool commissioned();
 
@@ -98,7 +99,7 @@ namespace net
 	 * threshold is in Celsius/whole percent regardless of the unit on the panel. */
 	void publish_reading(const Scd41Reading &r, bool fresh_co2);
 
-	/** The battery (and whatever rides along in the hook), every cycle. */
+	/** The battery, every cycle. */
 	void publish_battery(const battery::State &bat);
 
 	/** Pull the signal strength onto the status bar, once a cycle. A poll, because a signal
