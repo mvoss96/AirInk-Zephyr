@@ -60,7 +60,7 @@ namespace battery
 	 *
 	 * The first call seeds the smoothing filter, so it already returns a settled value
 	 * rather than ramping up from zero. A failed conversion is logged and returns the
-	 * previous state unchanged -- including the latch, which must not flap on an I2C
+	 * previous state unchanged -- including the latch, which must not flap on an ADC
 	 * hiccup any more than on noise.
 	 *
 	 * @return the current state

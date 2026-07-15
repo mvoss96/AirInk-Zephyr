@@ -3,15 +3,14 @@
 Derived from the NCS v3.4.0 `samples/matter/temperature_sensor`, retargeted to the
 AirInk hardware (`promicro_nrf52840/nrf52840`) and stripped of its MCUboot/OTA/DK
 assumptions so it runs as a **plain single image at 0x1000, flashed via UF2** — the same
-field-update story AirInk uses today. This is the Stage 2 + Stage 3 bring-up snapshot; the
-eventual goal is to merge AirInk's e-paper UI in (Stage 5).
+field-update story AirInk uses today. The whole device runs in here — see Status.
 
 Matter over Thread is the only radio this device has, and the only one it is going to have.
 Zigbee was carried as a fallback while the RAM budget was in doubt — Matter's ~158 KB was the
 whole risk of the project — and it stopped being one the day the full UI fitted alongside it.
 Nothing Zigbee is left in the tree.
 
-## Status (verified on hardware, 2026-07-13)
+## Status (verified on hardware, 2026-07-15)
 
 - **The whole device, plus Matter.** The e-paper UI, the menu and the forced-recalibration flow
   all run exactly as in the standalone firmware -- `app::run()` is the same code -- and the same
@@ -22,8 +21,8 @@ Nothing Zigbee is left in the tree.
   Onboarding: pairing code **`3535-860-0323`**, discriminator 3840, passcode **528722**.
 - Publishes everything the SCD41 measures, plus the battery: temperature, relative humidity,
   CO2 (ppm), a CO2-derived air quality level, and the PowerSource state.
-- Footprint: FLASH ~927 KB of the 940 KB code partition, **RAM ~247 KB of 256 KB (~15 KB free)**.
-  Tight, and deliberately so -- see below.
+- Footprint: FLASH ~901 KB of the 940 KB code partition, **RAM ~250.5 KB of 256 KB (~5.5 KB
+  free)**. Tight, and deliberately so -- see below. Measure before adding ANYTHING resident.
 - Console on **uart0 = COM9** (P1.04/P1.06), not the board's USB CDC default.
 
 ## Threads
@@ -34,9 +33,9 @@ because a full CO2 single-shot blocks for ~5 s and an e-paper refresh for ~2 s, 
 sit on the CHIP event loop while OpenThread waits to poll its parent.
 
 Direction of travel is one-way: AirInk measures and hands each reading to Matter (the hooks in
-`app::Hooks`, which take the CHIP stack lock). Matter never reaches back into the UI -- LVGL is
-not thread-safe, so the network state is left in a variable (`net::set_thread_connected()`) that the loop
-picks up on its next cycle.
+`net::Hooks`, installed here in `app_task.cpp`; each takes the CHIP stack lock). Matter never
+reaches back into the UI -- LVGL is not thread-safe, so the network state is left in a variable
+(`net::set_thread_connected()`) that the loop picks up on its next cycle.
 
 **`CONFIG_DK_LIBRARY=n`.** The DK library drives a development kit's buttons and LEDs; we have
 one button and no status LEDs, and that button already belongs to Zephyr's gpio-keys +
@@ -53,7 +52,7 @@ guessed. The merge overflowed by 34 KB on the first link. What paid for it:
 | | |
 |---|---|
 | `clip_buf` in the vendored ssd16xx driver | **−20 KB** |
-| `CONFIG_LV_Z_MEM_POOL_SIZE` 48 KB → 24 KB | −24 KB |
+| `CONFIG_LV_Z_MEM_POOL_SIZE` 48 KB → 24 KB (since re-grown to 32 KB, for the QR view) | −24 KB |
 | `CONFIG_MAIN_STACK_SIZE` 6 KB → 3 KB | −3 KB |
 | `CONFIG_CHIP_TASK_STACK_SIZE` 8 KB → 6 KB | −2 KB |
 
@@ -62,8 +61,8 @@ the largest panel the driver supports, and it is only ever used in the **portrai
 AirInk is landscape, so 20 KB of BSS sat there untouched -- in the standalone firmware too. It is
 now compiled only when a configured panel could need it.
 
-The LVGL pool is trimmed to its measured peak plus headroom: `ui::log_pool()` reports
-`peak 17644 of 24576 B` at boot, when every view is resident. If you add a view or a bigger font,
+The LVGL pool is trimmed to its measured peak plus headroom: `ui::log_pool()` prints
+used/peak/free at boot, when every view is resident. If you add a view or a bigger font,
 **read that line** -- running the pool dry is an MPU fault in `lv_draw_label`, not a graceful
 failure.
 
@@ -114,8 +113,9 @@ Two traps worth knowing, both of which cost real debugging time here:
   `VerifyOrDie` -- initialise it too early and the board aborts at boot. The concentration
   instance only returns an error, and would then silently never publish.
 - **Every code-driven cluster needs one instance per endpoint.** Identify is mandatory for each
-  sensor device type, so it exists on endpoints 1, 2 and 3. Instantiating it for only one leaves
-  the others' attribute reads failing during a controller's interview.
+  sensor device type, so when this data model still split the sensor across three endpoints, each
+  needed its own instance -- one shared one left the other two failing their attribute reads
+  during the controller's interview. (One more reason endpoint 1 is now the only sensor endpoint.)
 
 ## Commissioning: the five things that must all be right
 

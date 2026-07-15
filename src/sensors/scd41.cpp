@@ -112,11 +112,7 @@ int scd41::init()
 	{
 		return -ENODEV;
 	}
-	// The trim is NOT applied here. It is the user's, it lives in prefs, and only the caller has read
-	// them -- app::run() calls set_trim() a moment later. Applying the factory defaults first would be
-	// three I2C writes that the next three I2C writes undo, and a log line that says the wrong thing.
-	// A caller that has no prefs (the bench harness) gets whatever the sensor's EEPROM holds, which is
-	// exactly what a bench should measure.
+	// No trim here, deliberately -- the header says why.
 	return 0;
 }
 

@@ -38,7 +38,7 @@
  *
  *     Matter       --any gesture / 2 min idle--> list
  *     FactoryReset --tap / 30 s idle-----------> list
- *          | hold = FactoryReset (the loop's hook reboots us)
+ *          | hold = FactoryReset (net::factory_reset() reboots us)
  *
  * A failed calibration is the menu's own business: it puts the message up and waits for the user to
  * acknowledge it, so the loop never learns that one happened.
@@ -54,7 +54,7 @@ namespace menu
 		Running,	  // still inside; nothing for the loop to do
 		Exited,		  // show the readings again
 		Recalibrated, // as Exited, but the retained CO2 value predates the correction
-		FactoryReset  // the user confirmed it; the loop owns the hook that can actually do it
+		FactoryReset  // the user confirmed it; the loop hands it to net, which can actually do it
 	};
 
 	/** Open the menu on its first entry. */

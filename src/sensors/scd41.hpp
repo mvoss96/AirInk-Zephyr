@@ -4,8 +4,9 @@
 /** @file
  * SCD41 CO2/temperature/humidity sensor (I2C0, single-shot mode).
  *
- * Wraps the Zephyr SCD4X driver so main.cpp deals in plain readings, not sensor_value
- * plumbing. Device comes from the devicetree node `scd41`.
+ * Wraps the Zephyr SCD4X driver -- and speaks raw I2C where the driver has no path, such as the
+ * cheap T+RH-only single-shot -- so the loop deals in plain readings, not sensor_value plumbing.
+ * Device comes from the devicetree node `scd41`.
  */
 
 struct Scd41Reading
@@ -37,9 +38,14 @@ namespace scd41
 		bool auto_calib = false;  // ASC
 	};
 
-	/** Check the device is ready and put the factory trim into it. See set_trim().
+	/** Check the device is ready -- deliberately nothing more.
 	 *
-	 * @retval 0       the sensor is present and configured
+	 * The trim is NOT applied here: it is the user's, it lives in prefs, and prefs::apply_all()
+	 * hands it over a moment later (see app::run()). Writing the factory defaults first would be
+	 * three I2C writes that the next three undo. A caller with no prefs -- the bench harness --
+	 * gets whatever the sensor's EEPROM holds, which is exactly what a bench should measure.
+	 *
+	 * @retval 0       the sensor is present
 	 * @retval -ENODEV the devicetree node `scd41` is not ready
 	 */
 	int init();

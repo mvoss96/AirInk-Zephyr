@@ -17,10 +17,10 @@
 #endif
 
 /*
- * AirInk UI: one flat file. A persistent status bar (battery +
- * link) sits at the top and is never hidden; below it, one content view (boot /
- * sensor / error) is visible at a time. Each view is a lightweight container so
- * a view switch is a single hide/show — no screen enum, model, or registry.
+ * AirInk UI: one flat file. A persistent status bar (battery + signal) sits at the
+ * top and is never hidden; below it, exactly one content view is visible at a time.
+ * Each view is a lightweight container, so a view switch is a single hide/show;
+ * the VIEWS table below is the whole registry of them.
  *
  * E-paper refresh: full (blanking on/off -> clean, black flash) on a view change
  * and periodically to clear ghosting; partial (fast, no flash) for in-place value

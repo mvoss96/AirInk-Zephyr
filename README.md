@@ -70,15 +70,11 @@ runs it as `main()`. The Matter application runs it on a dedicated thread, next 
 loop and OpenThread — because a CO2 read blocks for ~5 s and an e-paper refresh for ~2 s, and
 neither may sit on the event loop while OpenThread waits to poll its parent.
 
-The coupling is one-way and deliberately thin. `app.cpp` knows nothing about Matter: it calls two
-optional function pointers (`app::Hooks`) after each cycle, which the Matter application installs
-and the standalone one leaves null. In the other direction, Matter never touches the UI — LVGL is
-not thread-safe — so it drops the radio state with `net::set_thread_connected()` and the loop picks it up on its
-next pass.
-
-The one exception is `#ifndef CONFIG_CHIP` in `app.cpp`, guarding the console power-down: the
-standalone build suspends the console UART while it sleeps (~1 mA versus a 60 µA idle floor), and
-the Matter build must not, because CHIP and OpenThread log while we wait. Those two lines are the
-only place the device code knows which application is building it.
+The coupling is one-way and deliberately thin. The device code knows nothing about Matter:
+everything the loop says to the world beyond the panel goes through `src/net.cpp`, whose hooks
+(`net::Hooks`) the Matter application installs and the standalone one leaves null — absence of a
+radio is a value, not a build flavour, so the device code has no `#ifdef`s at all. In the other
+direction, Matter never touches the UI — LVGL is not thread-safe — so it leaves its state where
+the loop picks it up on its next pass (`net::set_thread_connected()`).
 
 See `apps/matter/README.md` for the Matter data model, the commissioning traps, and the RAM budget.

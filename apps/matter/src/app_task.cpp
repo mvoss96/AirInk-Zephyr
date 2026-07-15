@@ -304,7 +304,7 @@ void FactoryReset()
  *
  * The SDK's server is a closed singleton: it holds the value, persists it, and reports it, and hands
  * the application neither a delegate nor a callback. So the traffic goes both ways by hand -- pushed
- * out here, polled back in by the loop (see ::net::Hooks::unit_from_network). */
+ * out here, polled back in by net::poll() (see ::net::Hooks::unit_from_network). */
 ui::TempUnit FromMatter(UnitLocalization::TempUnitEnum u)
 {
 	return u == UnitLocalization::TempUnitEnum::kFahrenheit ? ui::TempUnit::Fahrenheit
