@@ -39,19 +39,11 @@ namespace
 	 * the ~4.8 V USB rail, hundreds of mV above the cell. */
 	constexpr int32_t CHARGE_DETECT_MV = 300;
 
-	/** Read one channel as a cell voltage: pin voltage x the divider ratio.
-	 * Scale the raw counts BEFORE converting. adc_raw_to_millivolts_dt() truncates to
-	 * whole millivolts at the pin, so converting first and multiplying afterwards
-	 * multiplies that rounding error too: the cell voltage would land on multiples of
-	 * `scale` mV (4 mV here -- two percentage points on the steep part of the Li-Ion
-	 * curve). The conversion is linear, so pre-scaling is exact and costs nothing.
-	 *
-	 * @param      ch     the configured ADC channel to sample
-	 * @param      scale  divider ratio: 4 for the external divider, 5 for VDDH/5
-	 * @param[out] mv_out receives the cell voltage in millivolts
-	 * @retval 0      on success
-	 * @retval -errno the conversion failed; *mv_out is left untouched
-	 */
+	/** Read one channel as a cell voltage: raw counts x divider ratio, scaled BEFORE converting --
+	 * adc_raw_to_millivolts_dt() truncates to whole mV, and converting first would multiply that
+	 * error by `scale` (4 mV = two percentage points on the steep part of the Li-Ion curve).
+	 * @param scale 4 for the external divider, 5 for VDDH/5
+	 * @retval -errno conversion failed; *mv_out untouched */
 	int read_cell_mv(const struct adc_dt_spec &ch, int scale, int32_t *mv_out)
 	{
 		int16_t raw = 0;
@@ -81,14 +73,9 @@ namespace
 		return 0;
 	}
 
-	// Filter the mV, not the derived integer % -- the continuous quantity keeps the
-	// filter's sub-percent resolution. SAADC jitter of a few mV bounces the percent by
-	// several points on the steep part of the Li-Ion curve.
-	//
-	// The battery gauge falls ~4x more readily than it rises: a cell that reads low is
-	// merely pessimistic (~0.25 pp at the steepest point), one that reads high strands
-	// the user. Nothing needs tracking quickly -- charging is detected on the raw
-	// reading, and the slow settle costs nothing because the first sample seeds it.
+	// Filter the mV, not the derived % (keeps sub-percent resolution). Asymmetric: the gauge falls
+	// ~4x more readily than it rises, because a cell that reads low is pessimistic and one that
+	// reads high strands the user. Charging is detected on the raw reading, so nothing here is slow.
 	Ema<5, 3> ext_mv_ema;
 
 	// Survives a failed conversion, so a hiccup neither zeroes the gauge nor flaps the
@@ -96,18 +83,10 @@ namespace
 	battery::State state;
 	bool pct_seeded;
 
-	/* Deadband on the reported percentage. The gauge dithers by +-1 pp and no amount of
-	 * smoothing removes it: the ADC's least significant bit is ~3.5 mV and the Li-Ion curve
-	 * is ~2 mV per percent, so two adjacent codes can already be two different percentages.
-	 * Filtering the millivolts (which we do) narrows the noise but cannot make the quantiser
-	 * coarser than itself.
-	 *
-	 * It is not a cosmetic problem. set_battery() dedups on the percentage, so every dither
-	 * is a *changed displayed value* -- and therefore a full e-paper refresh, ~3 mAs, for a
-	 * number that did not really move. At 2 pp the deadband is wider than the dither and
-	 * narrower than anything a user would notice missing; a genuine drift crosses it within
-	 * a percent and is then reported in full.
-	 */
+	/* Deadband on the reported percent. The +-1 pp dither is structural -- the ADC's LSB (~3.5 mV)
+	 * is wider than the curve's ~2 mV/percent, and no mV smoothing can make the quantiser coarser
+	 * than itself -- and every dither is a changed displayed value, i.e. a ~3 mAs refresh. 2 pp is
+	 * wider than the dither, narrower than anyone would miss. */
 	constexpr int PCT_DEADBAND = 2;
 
 } // namespace
@@ -133,13 +112,9 @@ int battery::watch_supply(void (*on_change)())
 {
 	supply_cb = on_change;
 
-	/* nrfx_power_init() writes DCDCEN and DCDCEN_VDDH from its config -- it is not just an
-	 * "enable the module" call. Zephyr has already set both (the board's regulator nodes /
-	 * CONFIG_BOARD_ENABLE_DCDC), and handing it a zeroed config would switch the DC/DC
-	 * converters back off, which is a power regression measured in hundreds of microamps. So
-	 * read the state back out of the peripheral and pass it through unchanged: init then
-	 * writes exactly what is already there.
-	 */
+	/* nrfx_power_init() WRITES DCDCEN from its config. Zephyr already enabled the DC/DC converters,
+	 * and a zeroed config would switch them back off -- hundreds of microamps of regression. So
+	 * read the state out of the peripheral and hand it back unchanged. */
 	nrfx_power_config_t cfg{};
 	cfg.dcdcen = nrf_power_dcdcen_get(NRF_POWER);
 #if NRF_POWER_HAS_DCDCEN_VDDH

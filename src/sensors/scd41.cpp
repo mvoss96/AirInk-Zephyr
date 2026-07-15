@@ -51,19 +51,10 @@ namespace
 		k_msleep(30); // wake-up time per datasheet
 	}
 
-	/** Write one SCD41 setting. Volatile: the value lives in the sensor's RAM until it loses power.
-	 *
-	 * val1/val2 and not a single integer, because the driver reads the temperature offset as a real
-	 * number of degrees -- `val1 + val2/1e6` -- and an offset written as whole degrees would silently
-	 * throw away the half the user just dialled in.
-	 *
-	 * @param attr the SCD4X-private attribute
-	 * @param val1 the whole part, in the attribute's own units
-	 * @param val2 the fraction, in millionths
-	 * @param what what to call it if it fails
-	 * @retval 0    written
-	 * @retval -EIO the sensor would not take it
-	 */
+	/** Write one SCD41 setting (into RAM; gone on power loss). val1 + val2/1e6, because the driver
+	 * reads the offset as a real number of degrees -- whole degrees would silently drop the half
+	 * the user just dialled in.
+	 * @retval -EIO the sensor would not take it (logged as `what`) */
 	int put(int attr, int32_t val1, int32_t val2, const char *what)
 	{
 		struct sensor_value sv{};
@@ -134,18 +125,13 @@ int scd41::set_trim(const Trim &t)
 	err |= put(SENSOR_ATTR_SCD4X_AUTOMATIC_CALIB_ENABLE, t.auto_calib ? 1 : 0, 0,
 			   "self-calibration");
 
-	// Back to sleep, and this matters more than it looks. Every other command path here powers the
-	// sensor down when it is finished; this one is called from the menu, on every toggle and every
-	// saved number -- and while the menu is open the loop takes no readings, so nothing else would
-	// come along and do it. An idle SCD41 left awake for the thirty seconds until the menu times out
-	// is the kind of leak that never shows up in a log and does show up in the battery.
+	// Back to sleep -- this path is called from the menu, when the loop takes no readings, so
+	// nothing else would come along to do it. A sensor left idling until the menu times out is the
+	// kind of leak that never shows in a log and does show in the battery.
 	power_down();
 
-	// Deliberately NOT persisted. scd4x_persist_settings() writes the sensor's EEPROM, which has a
-	// life measured in thousands of writes -- and these are settings a user is meant to sit and turn
-	// until the panel agrees with their thermometer. They live in our own NVS instead (prefs) and are
-	// written back into the sensor's RAM on every boot, which costs three I2C transfers and nothing
-	// else. The sensor's EEPROM is its business; ours is ours.
+	// Deliberately NOT persisted: scd4x_persist_settings() writes the sensor's EEPROM (a few
+	// thousand writes of life). prefs re-pushes on every boot instead -- three I2C transfers.
 	printk("[SCD41] trim: offset %d.%d C, altitude %d m, self-calib %s%s\n", t.temp_offset_x10 / 10,
 		   abs(t.temp_offset_x10 % 10), t.altitude_m, t.auto_calib ? "on" : "off",
 		   err ? "  (INCOMPLETE)" : "");
@@ -194,10 +180,8 @@ int scd41::sample_rht(Scd41Reading *out)
 		return -EIO;
 	}
 
-	/* The CRCs, which this path used to skip. It runs on nine of every ten cycles -- the driver's
-	 * full-CO2 path checks them, this hand-rolled one did not -- and a corrupted word does not look
-	 * like an error: it looks like a temperature. It would then go into the EMA and linger for
-	 * several ticks. The bytes are already in the buffer; all they needed was reading. */
+	/* Checked, because a corrupted word does not look like an error -- it looks like a temperature,
+	 * goes into the EMA, and lingers for several ticks. This path runs 9 of 10 cycles. */
 	if (crc8(&rd[3]) != rd[5] || crc8(&rd[6]) != rd[8])
 	{
 		printk("SCD41: bad CRC on the T/RH read\n");
@@ -240,11 +224,9 @@ int scd41::calibrate_finish(uint16_t target_ppm, int16_t *correction_ppm)
 		return -EIO;
 	}
 
-	/* The driver's set_idle_mode() branches on the DEVICETREE mode, which is
-	 * single-shot, so it would send wake_up rather than stop the periodic measurement
-	 * we started above -- hence stop_periodic() here. From this point it does the right
-	 * thing: FRC on an idle sensor, then setup_measurement(), which for single-shot is
-	 * a power_down. That is exactly our normal resting state. */
+	/* stop_periodic() by hand, because the driver's set_idle_mode() branches on the DEVICETREE mode
+	 * (single-shot) and would send wake_up instead of stopping the periodic run we started. From
+	 * here the driver does the right thing: FRC, then power_down -- our normal resting state. */
 	uint16_t correction = 0;
 	if (scd4x_forced_recalibration(scd41_dev, target_ppm, &correction) < 0)
 	{

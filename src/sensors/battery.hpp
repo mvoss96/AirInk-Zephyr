@@ -4,66 +4,35 @@
 /** @file
  * Battery monitor: state of charge, USB charge detection, and the low-battery latch.
  *
- * Two SAADC channels from the devicetree `zephyr,user` io-channels:
- *   [0] ext = external divider on P0.31 (300k BAT+ / 100k GND -> V_bat/4)
- *   [1] int = SoC internal VDDH/5 path (no external parts)
- *
- * The external divider is the gauge. The internal path is read only to compare the
- * two: on USB, VDDH sits well above the cell, which is how charging is detected. Its
- * own voltage is of no interest to callers and does not leave the module.
- *
- * Neither does the cell voltage, the smoothing, or the fact that a conversion can fail.
- * Callers ask what the battery is doing and get an answer.
+ * Two SAADC channels ([0] external divider on P0.31 = V_bat/4, [1] internal VDDH/5). The divider
+ * is the gauge; the internal path exists only for charge detection -- on USB, VDDH sits well above
+ * the cell. Cell voltage, smoothing and conversion failures stay inside the module: callers ask
+ * what the battery is doing and get an answer.
  */
 namespace battery
 {
-	// The latch engages at or below the first, releases at or above the second. Charging
-	// always releases it. The gap absorbs the +-1 pp jitter the smoothed percent still
-	// has near a boundary -- a flapping latch would be a view change on the panel, i.e.
-	// a full-refresh black flash every 30 s.
+	// Low-battery latch with hysteresis; charging always releases it. The gap absorbs the +-1 pp
+	// jitter the smoothed percent keeps -- a flapping latch would be a full-refresh black flash
+	// every 30 s.
 	constexpr uint8_t LOW_ENTER_PCT = 5;
 	constexpr uint8_t LOW_EXIT_PCT = 8;
 
-	/** What the battery is doing. */
 	struct State
 	{
 		uint8_t pct;   // 0..100, EMA-smoothed
-		bool charging; // USB present: VDDH sits well above BAT+ (instantaneous)
+		bool charging; // USB present (instantaneous, from the raw voltages)
 		bool low;      // latched; see LOW_ENTER_PCT / LOW_EXIT_PCT
 	};
 
-	/** Ready-check and configure both ADC channels.
-	 *
-	 * @retval 0       both channels are set up
-	 * @retval -ENODEV the SAADC is not ready
-	 * @retval -errno  a channel could not be configured
-	 */
+	/** Configure both ADC channels. @retval -ENODEV SAADC not ready */
 	int init();
 
-	/** Call back the instant USB power appears or disappears.
-	 *
-	 * read() detects charging on the raw voltages, so it is never stale -- but the loop only
-	 * calls it once per 30 s cycle, which is how long the charging bolt used to linger on the
-	 * panel after the cable was pulled. This is the missing half: the SoC's POWER peripheral
-	 * raises USBDETECTED/USBREMOVED the moment VBUS moves, so the loop can be woken instead of
-	 * polled. Costs nothing while nothing happens.
-	 *
-	 * @param on_change runs in the POWER interrupt: wake somebody, touch nothing else
-	 *
-	 * @retval 0       VBUS events will be delivered
-	 * @retval -errno  the POWER peripheral refused; the bolt then updates on the next cycle,
-	 *                 as it always did
-	 */
+	/** Call back the instant USB power appears or disappears (POWER interrupt: wake somebody,
+	 * touch nothing else). Without it the charging bolt lags by up to one 30 s cycle.
+	 * @retval negative: no VBUS events; the bolt then updates on the next cycle as it used to */
 	int watch_supply(void (*on_change)());
 
-	/** Read both channels and derive the state.
-	 *
-	 * The first call seeds the smoothing filter, so it already returns a settled value
-	 * rather than ramping up from zero. A failed conversion is logged and returns the
-	 * previous state unchanged -- including the latch, which must not flap on an ADC
-	 * hiccup any more than on noise.
-	 *
-	 * @return the current state
-	 */
+	/** Read both channels and derive the state. The first call seeds the smoothing filter; a
+	 * failed conversion logs and returns the previous state unchanged, latch included. */
 	State read();
 }

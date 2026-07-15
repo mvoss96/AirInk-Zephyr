@@ -72,20 +72,10 @@ int button::init()
 		return -ENODEV;
 	}
 
-	/* Claim the button, and never let go.
-	 *
-	 * gpio-keys registers itself with device runtime PM in its own init (input_gpio_keys.c calls
-	 * pm_device_runtime_enable), and enabling runtime PM *suspends* the device on the spot --
-	 * whose suspend action is gpio_pin_interrupt_configure_dt(GPIO_INT_DISABLE). So with
-	 * CONFIG_PM_DEVICE_RUNTIME the button interrupt is off from boot, silently, until somebody
-	 * says they want it. That is the driver's design: a button costs current (pull-up), so it is
-	 * the application that decides whether it is worth having.
-	 *
-	 * We always want it: the panel's only input is this one button. So take a reference here and
-	 * hold it for the life of the device -- there is no matching put(), on purpose.
-	 *
-	 * (No-op when runtime PM is off; the header stubs it out.)
-	 */
+	/* Claim the button, and never let go: with CONFIG_PM_DEVICE_RUNTIME, gpio-keys enables runtime
+	 * PM on itself and is thereby SUSPENDED from boot -- suspend disables the pin interrupt -- so
+	 * without this reference the button is silently dead. No matching put(), on purpose: this is
+	 * the panel's only input. (No-op when runtime PM is off.) */
 	const int err = pm_device_runtime_get(btn_dev);
 	if (err < 0)
 	{

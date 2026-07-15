@@ -15,12 +15,8 @@ namespace
 	scd41::Trim sensor_trim{};
 	bool store_up = false;
 
-	/* What has to happen once a setting has changed, whoever changed it.
-	 *
-	 * @param local true when the user chose it here, false when it came in from the network -- the
-	 *              only difference is whether the network is told, and telling it what it just told
-	 *              us would be an echo, not a sync.
-	 */
+	/* What has to happen once a setting changed, whoever changed it. `local` = the user chose it
+	 * here; only then is the network told (telling it its own news would be an echo, not a sync). */
 	void apply_unit(bool local)
 	{
 		ui::set_temp_unit(unit);
@@ -36,13 +32,9 @@ namespace
 		scd41::set_trim(sensor_trim);
 	}
 
-	/* Every setting, once: its key, where it lives, how wide it is on the wire, what a valid value is,
-	 * and what has to happen when it changes.
-	 *
-	 * The point of the table is that this is the ONLY place a setting is described. Loading, saving,
-	 * clamping, defaulting and applying all walk it, so adding one is adding a row -- not a new case in
-	 * the loader, a new setter that looks like the last three, and a new line in somebody else's
-	 * aftermath that nothing would have missed. */
+	/* Every setting, once: key, address, wire width, valid range, and what happens when it changes.
+	 * Loading, saving, clamping and applying all walk this table -- adding a setting is adding a
+	 * row, not a new case in the loader plus a setter plus a forgettable aftermath. */
 	struct Setting
 	{
 		const char *key;
@@ -203,10 +195,8 @@ int prefs::init()
 
 void prefs::apply_all()
 {
-	/* Walked rather than spelled out, so a new row cannot be forgotten here -- that forgetting is the
-	 * whole reason this file has a table. But an apply shared by several rows runs ONCE: three of the
-	 * four settings are the sensor's trim, and scd41::set_trim() is a wake, three I2C writes and a
-	 * power-down, not a variable assignment. */
+	/* Walked, so a new row cannot be forgotten -- but a shared apply runs ONCE: three rows are the
+	 * sensor's trim, and set_trim() is a wake + three I2C writes + power-down, not an assignment. */
 	void (*done[COUNT])(bool) = {};
 	size_t n = 0;
 
@@ -223,10 +213,8 @@ void prefs::apply_all()
 		}
 		done[n++] = s.apply;
 
-		// `true`: the network has not spoken yet, and its own copy of the unit is one it reloaded on
-		// boot. Pushing outward here is what settles who is in charge -- prefs is the authority, the
-		// cluster is the mirror. If we only ever listened, the controller's copy would win every
-		// restart and the unit the user set on the panel would not survive one.
+		// `true` = push outward: the cluster reloaded its own copy on boot, and this call is what
+		// makes prefs the authority and the cluster the mirror.
 		s.apply(true);
 	}
 }

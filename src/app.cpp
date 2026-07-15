@@ -41,15 +41,10 @@ void app::forget_last_temp()
 	last_temp = INT32_MIN;
 }
 
-/** Read the SCD41 and put the numbers on screen.
- *
- * A full CO2 single-shot on every tenth call, a ~1000x cheaper T+RH read otherwise; the
- * last CO2 value stays on screen in between. A reading also selects the sensor view,
- * which is how the boot splash and a stale error message go away.
- *
- * On a read error the error view is staged instead, and the cadence does not advance --
- * so the next call retries the same kind of read.
- */
+/** Read the SCD41 and put the numbers on screen. Every tenth call is the full CO2 single-shot,
+ * the rest are ~1000x cheaper T+RH reads; the last CO2 value is held in between. A reading also
+ * selects the sensor view, which is how the splash and a stale error go away. On a read error the
+ * cadence does not advance, so the next call retries the same kind of read. */
 static void measure()
 {
 	const bool full_co2 = (tick_count % CO2_EVERY_TICKS) == 0;
@@ -99,19 +94,11 @@ static void on_supply_change()
 	k_sem_give(&supply_changed);
 }
 
-/** Sleep until something worth redrawing happens, or until the deadline.
+/** Sleep until the button, the USB cable, or the deadline. The cable wakes us so the charging
+ * bolt tracks it immediately instead of lagging a 30 s cycle; an early wake needs no special case
+ * because every pass re-reads the battery anyway.
  *
- * Two things count as something: the button, and the USB cable. The cable matters because the
- * charging bolt is on screen, and a bolt that takes half a minute to go out after the cable is
- * pulled reads as a bug, not as a cadence -- charging is detected on the raw voltages, so it was
- * never stale; the panel simply had nobody to tell it.
- *
- * Polling for it would have cost current every cycle for an event that happens twice a week. The
- * SoC raises USBDETECTED/USBREMOVED on its own, so we wait for it instead, and the caller does
- * what it does anyway on every pass: read the battery, stage it, refresh. An early wake needs no
- * special case -- it just makes the next pass happen sooner.
- *
- * @param deadline_ms absolute k_uptime_get() value; already past means "just take what is queued"
+ * @param deadline_ms absolute k_uptime_get() value; already past = just take what is queued
  * @return the gesture, or Event::None -- which is also what a cable wake looks like
  */
 static button::Event wait(int64_t deadline_ms)
@@ -134,14 +121,9 @@ static button::Event wait(int64_t deadline_ms)
 	return button::wait_until(0); // a gesture if k_poll found one; None otherwise
 }
 
-/** Read the battery, put it on the status bar, and tell whoever is listening.
- *
- * Every pass of every loop starts here, so this is also where the Matter build refreshes its view of
- * the fabric table (it rides along in the battery hook) -- which is how the onboarding screen below
- * notices somebody commissioning us without a gesture.
- *
- * @return what the battery is doing, for the caller that has to act on it
- */
+/** Read the battery, stage it, tell the network. Every pass starts here -- which is also how the
+ * Matter build refreshes net::commissioned() (it rides in the battery hook), and how the
+ * onboarding screen below notices a commissioner without a gesture. */
 static battery::State poll_battery()
 {
 	const battery::State bat = battery::read();
@@ -151,26 +133,11 @@ static battery::State poll_battery()
 	return bat;
 }
 
-/** A device that has never joined anything boots to its own onboarding code.
- *
- * The readings are not what a factory-new device is for: nobody has told it where to send them, and
- * the one thing the user has to do -- scan the code -- is the one thing the panel can help with. So
- * it shows the code first and the numbers afterwards. The radio is already listening; the boot
- * window opened on its own (CONFIG_CHIP_ENABLE_PAIRING_AUTOSTART).
- *
- * Nothing is measured while this is up. That is not laziness: a reading here would have nowhere to
- * go, and staging it would repaint the panel -- and a panel refresh is the single most expensive
- * thing this device does (~39 % of its energy). The screen is e-paper; leaving the code on it costs
- * nothing at all.
- *
- * Two ways out, and the device takes whichever comes first:
- *   - a fabric appears  -> somebody scanned it. On to the readings, no gesture needed.
- *   - the button        -> the user declined. On to the readings, and the caller is told, so it can
- *                          cut the commissioning window short rather than leave it open for the
- *                          hour boot gave it.
- *
- * A build with no codes -- the standalone one -- has no onboarding to do and returns at once.
- */
+/** A device that has never joined anything boots to its onboarding code; the radio is already
+ * listening (CONFIG_CHIP_ENABLE_PAIRING_AUTOSTART). Nothing is measured meanwhile: a reading would
+ * have nowhere to go and would repaint the panel for nothing. Two ways out, whichever comes first:
+ * a fabric appears (scanned), or the button (declined -- then net cuts the boot window short).
+ * A build with no codes returns at once. */
 static void onboarding()
 {
 	if (!net::has_radio() || net::commissioned())
@@ -316,20 +283,11 @@ void app::run()
 		k_sleep(K_FOREVER); // leave the error on screen
 	}
 
-	/* Everything the user has ever chosen, put where it acts -- and this is the first moment it can be,
-	 * because until now there was nothing to put it INTO: the panel had not been built and the sensor
-	 * had not answered. The splash is still up, so nobody sees a temperature in the wrong unit.
-	 *
-	 * What it does, per prefs's table: the unit onto the panel and outward to the network; the trim
-	 * (offset, altitude, self-calibration) into the SCD41's RAM, where it has to be written back on
-	 * every boot because we keep it in our NVS and not in the sensor's EEPROM (see scd41::set_trim).
-	 *
-	 * Pushing the unit OUT before the loop ever polls the other way is what settles the argument: the
-	 * Matter cluster reloads a copy of its own on boot, so a device that only ever listened would let
-	 * the controller's copy win every restart, and the unit the user set on the panel would not survive
-	 * one. prefs is the authority; the cluster is the mirror.
-	 *
-	 * Survivable if the sensor refuses: it keeps measuring, just with the factory's idea of the room. */
+	/* Everything the user ever chose, put where it acts (panel, sensor, network) -- the first moment
+	 * it can be, since neither existed until now; the splash is still up, so nobody sees the wrong
+	 * unit. Pushing the unit OUT before the loop polls the other way is what makes prefs the
+	 * authority (see net::Hooks::publish_unit). Survivable if the sensor refuses: it measures on
+	 * with the factory's idea of the room. */
 	prefs::apply_all();
 
 	if (battery::init() < 0)

@@ -3,68 +3,40 @@
 #include <stdio.h>
 
 /*
- * Rounding of sensor readings to the resolution the panel actually shows.
- *
- * set_sensor() dedups on these quantized values, so a change too small to be displayed
- * costs no e-paper refresh -- that is what keeps a stable T+RH tick at ~0.16 mAs
- * instead of ~3 mAs. The sub-zero path is easy to get wrong: integer division
- * truncates toward zero, so the tie has to be nudged away from it by hand.
+ * Rounding of readings to what the panel actually shows. set_sensor() dedups on these, so a change
+ * too small to display costs no e-paper refresh (~0.16 mAs per stable tick instead of ~3 mAs).
+ * Sub-zero is the trap throughout: integer division truncates toward zero.
  */
 namespace ui
 {
-	/** Round a temperature to the 0.1 C the panel shows.
-	 * Ties round away from zero: -0.25 C -> -0.3, +0.25 C -> +0.3.
-	 *
-	 * @param temp_x100 temperature in hundredths of a degree (may be negative)
-	 * @return the same value snapped to a multiple of 10 (i.e. 0.1 C)
-	 */
+	/** Round to the 0.1 C the panel shows; ties away from zero. */
 	inline int32_t quantize_temp_x100(int32_t temp_x100)
 	{
 		return ((temp_x100 + (temp_x100 >= 0 ? 5 : -5)) / 10) * 10;
 	}
 
-	/** Convert a Celsius reading to Fahrenheit and round it to the whole degree the panel shows.
-	 *
-	 * Whole degrees, not tenths, and that is the reason this is not simply quantize_temp_x100 applied
-	 * to a converted value: 1 F is 5.6x COARSER than the 0.1 C shown in the other unit, so the
-	 * displayed number changes -- and the panel refreshes -- markedly less often. Tenths of a degree
-	 * Fahrenheit would be 1.8x FINER than tenths of a Celsius, and would cost refreshes instead.
-	 *
-	 * The conversion truncates by under 0.01 F, which cannot survive rounding to a whole degree.
-	 *
-	 * @param temp_x100 temperature in hundredths of a degree CELSIUS (may be negative)
-	 * @return the temperature in hundredths of a degree FAHRENHEIT, snapped to a multiple of 100
-	 */
+	/** Celsius in, whole Fahrenheit out (x100). Whole degrees on purpose: 1 F is 5.6x coarser than
+	 * the displayed 0.1 C, so the panel refreshes LESS often in F -- tenths of a F would be finer
+	 * and cost refreshes instead. */
 	inline int32_t quantize_temp_f_x100(int32_t temp_x100)
 	{
 		const int32_t f_x100 = temp_x100 * 9 / 5 + 3200;
 		return ((f_x100 + (f_x100 >= 0 ? 50 : -50)) / 100) * 100;
 	}
 
-	/** How many signal bars a Thread link of this strength earns: 0 (attached, but barely) to 4.
-	 *
-	 * The thresholds are ordinary 2.4 GHz ones and the exact dBm are a judgement call, but the
-	 * hysteresis is not decoration. This value feeds the same dedup as everything else in the status
-	 * bar, so a link sitting on a boundary -- which is precisely what a badly placed device does --
-	 * would flip the bar count back and forth and buy a ~3 mAs e-paper refresh every 30 s for the
-	 * privilege. Once a level is held, it takes SIGNAL_HYST_DB of real change to leave it.
-	 *
-	 * (The battery percentage has the same disease and no cure yet; see docs/power-analysis.md.)
-	 *
-	 * @param rssi_dbm  average RSSI to the parent router, in dBm (negative; ~-40 near, ~-100 at the edge)
-	 * @param prev_bars what is on the panel now, so the level can be held; 0..4, or -1 for "nothing yet"
-	 * @return 0..4
-	 */
+	/** Signal bars for a Thread RSSI: 0 (attached, barely) to 4. The hysteresis is not decoration:
+	 * this feeds the status bar's dedup, and a link parked on a boundary -- a badly placed device,
+	 * exactly who needs the bars -- would otherwise buy a ~3 mAs refresh every 30 s.
+	 * @param prev_bars the level being held (0..4), or -1 for none */
 	inline int quantize_signal_bars(int rssi_dbm, int prev_bars)
 	{
 		constexpr int SIGNAL_HYST_DB = 3;
-		// The RSSI needed to REACH each level. Index is the bar count; [0] is unreachable by design,
-		// because 0 bars is what you get when you clear none of the others.
+		// RSSI needed to REACH each level; [0] unreachable by design.
 		constexpr int reach[5] = {-128, -95, -85, -75, -65};
 
 		for (int b = 4; b >= 1; b--)
 		{
-			// Already at this level or above it? Then hold on a few dB longer before giving it up.
+			// At this level or above? Hold it a few dB longer before giving it up.
 			const int t = (b <= prev_bars) ? reach[b] - SIGNAL_HYST_DB : reach[b];
 			if (rssi_dbm >= t)
 			{
@@ -74,22 +46,10 @@ namespace ui
 		return 0;
 	}
 
-	/** Write a hundredths value out as a person reads it: "-0.4", "23.5", "77".
-	 *
-	 * The sign is handled once, here, and that is the whole point of the function. The obvious idiom
-	 *
-	 *     snprintf(buf, "%d.%d", v / 100, abs(v % 100) / 10);
-	 *
-	 * loses the minus for everything between -1.00 and 0.00 -- integer division truncates toward zero,
-	 * so -50 / 100 is 0, and the panel prints "0.5" for half a degree of frost. It was in three places
-	 * before this existed, and a device whose calibration flow asks the user to stand outside in the
-	 * winter is not the device to get that wrong.
-	 *
-	 * @param buf      where to write
-	 * @param n        its size
-	 * @param v_x100   the value in hundredths of whatever it is
-	 * @param decimals 1 -> "23.5"; 0 -> "77" (rounded on the way in, not here)
-	 */
+	/** Write a hundredths value as a person reads it: "-0.4", "23.5", "77". Exists because the
+	 * obvious `"%d.%d", v/100, abs(v%100)/10` loses the minus for -1.00 < v < 0 (truncation toward
+	 * zero) -- it printed "0.5" for half a degree of frost, in three places.
+	 * @param decimals 1 -> "23.5"; 0 -> "77" (round before calling) */
 	inline void format_x100(char *buf, size_t n, int32_t v_x100, int decimals)
 	{
 		const char *sign = (v_x100 < 0) ? "-" : "";
@@ -105,11 +65,7 @@ namespace ui
 		}
 	}
 
-	/** Round a humidity to the whole percent the panel shows.
-	 *
-	 * @param hum_x100 relative humidity in hundredths of a percent (never negative)
-	 * @return the same value snapped to a multiple of 100 (i.e. 1 %)
-	 */
+	/** Round to the whole percent the panel shows (never negative). */
 	inline uint16_t quantize_hum_x100(uint16_t hum_x100)
 	{
 		return (uint16_t)(((hum_x100 + 50) / 100) * 100);

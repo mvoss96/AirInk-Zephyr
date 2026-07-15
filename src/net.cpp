@@ -134,16 +134,9 @@ void net::publish_battery(const battery::State &bat)
 	}
 }
 
-/** Adopt a temperature unit the controller set, if it did.
- *
- * The other half of the menu's toggle. A user with the phone in their hand may well change the unit
- * from Home Assistant rather than walk to the device, and the panel has to agree with what the app
- * shows -- a thermometer that disagrees with its own record is worse than one with no app at all.
- *
- * What comes in goes into prefs, which repaints the panel and writes it down -- so the device boots on
- * the last thing anyone chose, whoever chose it and wherever. adopt() and not set(), because the one
- * thing that must NOT happen is telling the network what the network has just told us.
- */
+/** Adopt a unit the controller set: into prefs, which repaints and persists -- so the device boots
+ * on the last thing anyone chose, wherever they chose it. adopt(), not set(): never tell the
+ * network its own news. */
 static void pull_unit()
 {
 	if (!hooks.unit_from_network)
@@ -151,9 +144,7 @@ static void pull_unit()
 		return; // no network, no second opinion
 	}
 
-	// Compared against the store: a value that has not moved would be dropped by prefs anyway; the
-	// point of the guard is the log line below, which would otherwise appear every half minute for
-	// ever.
+	// The guard exists for the log line below; prefs would drop an unmoved value anyway.
 	ui::TempUnit u;
 	if (!hooks.unit_from_network(&u) || (int32_t)u == prefs::get(prefs::Unit))
 	{
@@ -164,21 +155,12 @@ static void pull_unit()
 	prefs::adopt(prefs::Unit, (int32_t)u);
 }
 
-/** Ask the radio how well it is heard, and put the answer on the status bar as 0..4 bars.
- *
- * Everything short of a measured, joined link comes out as -1 -- no radio in this build, not
- * joined, or joined with no parent to be a child of yet -- and -1 draws nothing: an empty corner is
- * the honest amount to say, and four hollow outlines would claim "attached, no signal", a real and
- * much worse state.
- *
- * The quantizer's hysteresis (ui::quantize_signal_bars) is fed from here, because this is its only
- * caller: a link parked on a threshold must not flip the panel back and forth at ~3 mAs a go.
- */
+/** Ask the radio how well it is heard; onto the status bar as 0..4 bars, -1 for no link at all.
+ * The quantizer's hysteresis memory lives here, at its only caller. */
 static void pull_signal()
 {
-	// A lost link empties the corner. Anything less final -- one failed RSSI read on a link that is
-	// still up -- leaves the bars standing: the last measurement is still the best answer there is,
-	// and flapping the panel over a hiccup would cost ~3 mAs a flap.
+	// Only a LOST link empties the corner. A failed RSSI read on a live link leaves the bars
+	// standing -- the last measurement is still the best answer, and flapping costs ~3 mAs a go.
 	if (!thread_up)
 	{
 		prev_bars = -1;
@@ -193,12 +175,10 @@ static void pull_signal()
 	}
 
 	const int bars = ui::quantize_signal_bars(rssi, prev_bars);
-
-	// Log only when the bars actually move. The dBm behind them drifts a little every half minute
-	// and saying so every time would drown the log in noise -- but the moment the panel changes is
-	// worth a line, because that is the line you read when you are deciding where to put the device.
 	if (bars != prev_bars)
 	{
+		// Log only movement: the dBm drift every half minute is noise, the moment the panel
+		// changes is the line you read when deciding where to put the device.
 		printk("[SIG] %d dBm -> %d bars\n", rssi, bars);
 	}
 

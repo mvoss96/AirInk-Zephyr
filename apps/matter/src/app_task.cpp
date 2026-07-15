@@ -69,19 +69,10 @@ ConcentrationMeasurement::Instance<true, false, false, false, false, false>
 	     ConcentrationMeasurement::MeasurementMediumEnum::kAir,
 	     ConcentrationMeasurement::MeasurementUnitEnum::kPpm);
 
-/* What the SCD41 can OUTPUT -- not the band in which it is accurate.
- *
- * The accuracy figure in the datasheet is quoted for 400..5000 ppm, and those numbers were sitting
- * here as the cluster's Min/MaxMeasuredValue. That is not what those attributes are for, and the SDK
- * enforces them: SetMeasuredValue() calls CheckConstraintMinMax() and, for anything outside them,
- * returns CHIP_ERROR_INVALID_ARGUMENT and stores NOTHING (concentration-measurement-server.h:366).
- *
- * So a bedroom that passes 5000 ppm overnight -- which is exactly the reading a person bought a CO2
- * monitor to see -- froze the attribute at the last value under the bar. The panel showed the truth,
- * the Air Quality cluster (which has no such constraint) said ExtremelyPoor, and the number in Home
- * Assistant sat still. Nothing logged it, because nobody read the return.
- *
- * The sensor's actual output range is 0..40000 ppm. That is what the cluster may hold. */
+/* What the SCD41 can OUTPUT (0..40000 ppm) -- NOT its accuracy band (400..5000). The SDK enforces
+ * Min/MaxMeasuredValue: SetMeasuredValue() silently stores NOTHING outside them
+ * (concentration-measurement-server.h:366), so the accuracy band here froze the HA number at 5000
+ * in exactly the bedroom-overnight case a person bought a CO2 monitor for. */
 constexpr float kCo2MinPpm = 0.0f;
 constexpr float kCo2MaxPpm = 40000.0f;
 
@@ -146,25 +137,16 @@ void PublishBattery(const battery::State &bat)
 						     bat.low ? PowerSource::BatChargeLevelEnum::kCritical
 							     : PowerSource::BatChargeLevelEnum::kOk);
 
-	/* Riding along, because this is the one place that already holds the lock on AirInk's own
-	 * thread: whether we are on a fabric, which is what decides if the menu's Matter row is a way
-	 * in to the QR or a statement of fact.
-	 *
-	 * Polled rather than driven by an event, because there is no event for a fabric being
-	 * *removed* -- CHIP only signals kCommissioningComplete. The table is the truth, and this runs
-	 * on every wake of the loop, so the flag is fresh by the time the menu opens (the loop calls
-	 * this hook before it acts on the button). */
+	/* Riding along in the one place that already holds the lock on AirInk's thread. Polled, because
+	 * there is no event for a fabric being REMOVED (CHIP only signals kCommissioningComplete); the
+	 * table is the truth, and this runs before the loop acts on any button. */
 	::net::set_commissioned(Server::GetInstance().GetFabricTable().FabricCount() > 0);
 	PlatformMgr().UnlockChipStack();
 }
 
-/* Runs on the CHIP thread. Only records the state; the status bar belongs to AirInk's thread,
- * which picks the value up on its next cycle.
- *
- * Thread connectivity is the ONE event the panel cares about: it gates the signal bars, and losing
- * it is what empties them. The BLE advertising events used to be reported too, mapped through a
- * five-state Link enum -- for a "BLE.." status token that was deleted long before the enum was.
- * Nothing drew them; now nothing reports them. */
+/* Runs on the CHIP thread; only records the state, the loop paints it. Thread connectivity is the
+ * ONE event the panel cares about -- it gates the signal bars. (BLE advertising was reported too,
+ * for a status token deleted long before its enum was; nothing drew it, now nothing reports it.) */
 void MatterEventHandler(const ChipDeviceEvent *event, intptr_t)
 {
 	if (event->Type == DeviceEventType::kThreadConnectivityChange) {
@@ -179,14 +161,8 @@ char sQrCode[chip::QRCodeBasicSetupPayloadGenerator::kMaxQRCodeBase38Representat
 char sManualCode[chip::kManualSetupLongCodeCharLength + 1];
 char sManualCodePretty[sizeof(sManualCode) + 2]; /* room for the two dashes */
 
-/* CHIP hands the manual code back as bare digits ("35358600323"), which is what a controller
- * wants to parse but not what a human wants to type: eleven undifferentiated digits are read
- * wrong. Every controller UI groups them 4-3-4, so group them here too.
- *
- * Only the 11-digit short code is grouped -- the 21-digit long code (VID/PID embedded) has its
- * own layout, and we do not generate it. Anything unexpected is passed through unchanged rather
- * than mangled.
- */
+/* Group the manual code 4-3-4 as every controller UI does -- eleven bare digits are read wrong.
+ * Only the 11-digit short code; anything unexpected passes through unmangled. */
 const char *GroupManualCode(const char *digits)
 {
 	if (strlen(digits) != 11) {
@@ -215,29 +191,16 @@ void FetchOnboardingCodes()
 	::net::set_pairing_codes(sQrCode, GroupManualCode(sManualCode));
 }
 
-/* How long the radio listens after the user asks for the code. Ten minutes is what it takes to
- * fetch a phone and scan; it is not how long an accidental visit to the menu should leave the door
- * open. This is deliberately NOT the boot window: OpenBasicCommissioningWindow() defaults to
- * CHIP_DEVICE_CONFIG_DISCOVERY_TIMEOUT_SECS, which the nRF platform derives from
- * CONFIG_CHIP_BLE_ADVERTISING_DURATION (60 min) -- right for a factory-new device that nobody has
- * touched yet, too generous for a gesture. */
+/* How long the radio listens after the user asks for the code: enough to fetch a phone, not the
+ * boot window's full hour (CONFIG_CHIP_BLE_ADVERTISING_DURATION) -- that is right for a factory-new
+ * device, too generous for a gesture. */
 constexpr auto kPanelPairingWindow = System::Clock::Seconds32(10 * 60);
 
-/* The user just put the onboarding code on the panel, so start listening for whoever scans it.
- *
- * The code alone is not an invitation. CHIP advertises for an hour after boot and then stops, so on
- * a device that has been sitting on a shelf the QR would be a dead letter -- shown, scanned, and
- * never answered. Opening the window here is what makes the screen mean what it says.
- *
- * Runs on AirInk's thread, so it takes the stack lock, like the publish hooks above.
- *
- * The two guards mirror Nordic's own Board::StartBLEAdvertisement (nrf/samples/matter/common):
- * a commissioned device must not re-open (a second commissioner could join uninvited -- and the
- * menu does not offer this path there anyway), and an already-advertising one must not be
- * restarted, which would drop a PASE session that may be seconds from completing. Note the second
- * guard also means a device still inside its boot hour keeps that hour: this call does not shorten
- * a window that is already open.
- */
+/* The code is on the panel: start listening, or the QR is a dead letter once the boot hour is over.
+ * The two guards mirror Nordic's Board::StartBLEAdvertisement: a commissioned device must not
+ * re-open (a second commissioner could join uninvited), and an already-advertising one must not be
+ * restarted -- that would drop a PASE session seconds from completing. The second guard also means
+ * a device inside its boot hour keeps the hour. Runs on AirInk's thread; takes the stack lock. */
 void OpenPairingWindow()
 {
 	PlatformMgr().LockChipStack();
@@ -257,17 +220,10 @@ void OpenPairingWindow()
 	PlatformMgr().UnlockChipStack();
 }
 
-/* The user pressed the boot onboarding screen away. They saw the code and did not want it (yet), so
- * the hour that CONFIG_CHIP_ENABLE_PAIRING_AUTOSTART opened is now an hour of advertising nobody
- * asked for. Cut it to the same ten minutes the menu grants -- enough time to change their mind and
- * fetch a phone, not enough to leave the door open all afternoon.
- *
- * There is no "shorten" in CHIP, so this closes and re-opens. That is safe precisely here and
- * nowhere else: the user just pressed a button on a device that is not commissioned, which is not
- * something anyone does in the middle of scanning it. (The menu's OpenPairingWindow deliberately
- * does NOT do this -- it leaves an open window alone, because there it really could be interrupting
- * a PASE session.)
- */
+/* The user dismissed the boot onboarding screen: cut the autostart hour down to the same ten
+ * minutes the menu grants. CHIP has no "shorten", so this closes and re-opens -- safe precisely
+ * here, because nobody presses the button mid-scan; the menu's OpenPairingWindow deliberately does
+ * NOT do this, since there it really could interrupt a PASE session. */
 void ShortenPairingWindow()
 {
 	PlatformMgr().LockChipStack();
@@ -297,14 +253,10 @@ void FactoryReset()
 	Server::GetInstance().ScheduleFactoryReset();
 }
 
-/* The Unit Localization cluster (0x002D on the root node) is how a controller reads and sets the unit
- * the device displays. Note what it is NOT: the temperature itself stays Celsius on the wire, always
- * -- Matter reports centi-degrees Celsius and Home Assistant renders them in whatever the user's
- * profile says. This cluster is about the panel, and only the panel.
- *
- * The SDK's server is a closed singleton: it holds the value, persists it, and reports it, and hands
- * the application neither a delegate nor a callback. So the traffic goes both ways by hand -- pushed
- * out here, polled back in by net::poll() (see ::net::Hooks::unit_from_network). */
+/* Unit Localization (0x002D, root node): the unit the PANEL displays -- the temperature itself
+ * stays centi-Celsius on the wire, always. The SDK's server is a closed singleton with neither
+ * delegate nor callback, so traffic goes both ways by hand: pushed out here, polled back in by
+ * net::poll(). */
 ui::TempUnit FromMatter(UnitLocalization::TempUnitEnum u)
 {
 	return u == UnitLocalization::TempUnitEnum::kFahrenheit ? ui::TempUnit::Fahrenheit
@@ -333,14 +285,9 @@ bool UnitFromNetwork(ui::TempUnit *out)
 	return true;
 }
 
-/* How well the parent router hears us, for the status bar's bars.
- *
- * The average and not the last packet's RSSI: a single frame is noise, and the panel is not a
- * spectrum analyser -- it is a hint about where to put the thing. OpenThread already keeps the
- * average, so this is a read, not a measurement, and costs no radio time.
- *
- * Fails, correctly, whenever there is no parent to be heard by: not joined yet, or -- if this device
- * ever stops being a sleepy child -- a router itself, which has no parent at all. */
+/* How well the parent router hears us. The AVERAGE, not the last packet (a single frame is noise);
+ * OpenThread already keeps it, so this is a read, not a measurement. Fails, correctly, whenever
+ * there is no parent: not joined, or a router itself. */
 bool LinkRssi(int8_t *out)
 {
 	ThreadStackMgr().LockThreadStack();

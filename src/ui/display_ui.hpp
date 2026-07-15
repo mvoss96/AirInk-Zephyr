@@ -2,234 +2,116 @@
 #include <stdint.h>
 
 /** @file
- * LVGL UI for the AirInk 4.2" 400x300 e-paper.
+ * LVGL UI for the AirInk 4.2" 400x300 e-paper. A persistent status bar on top; below it exactly
+ * one content view at a time.
  *
- * A persistent status bar (battery + link) sits on top; below it one content view
- * is shown at a time.
+ * The API is staging + commit: every set_*() only updates retained widgets (no panel I/O),
+ * set_<view>() also selects the view, and one refresh() pushes ONE e-paper refresh for everything
+ * staged -- a measurement cycle costs one refresh, not one per update. Setters dedup at display
+ * resolution, because every avoided refresh is ~3 mAs.
  *
- * The API is staging + commit: every set_*() just updates the retained widgets
- * (no panel I/O), and set_<view>() also selects the active view. A single
- * refresh() then pushes ONE e-paper refresh for all staged changes — so a
- * measurement cycle costs one refresh, not one per update.
- *
- * If init() fails (no display), every function below is a safe no-op — callers
- * do not need to guard their ui:: calls.
+ * If init() fails (no display), everything below is a safe no-op.
  */
 namespace ui
 {
-
-	/** How many entries a menu may have. The panel decides this, not the menu: five 44 px rows are
-	 * what fits above the hint line, and show_list() refuses anything longer rather than drawing over
-	 * it. See the static_assert in display_ui.cpp. */
+	/** Menu length limit. The panel decides this -- five 44 px rows fit above the hint line -- and
+	 * show_list() refuses anything longer rather than drawing rows over each other. */
 	constexpr int LIST_MAX_ROWS = 5;
 
-	/** The unit the panel shows temperature in.
-	 *
-	 * A display preference and nothing more. The sensor reads Celsius and the Matter cluster reports
-	 * Celsius, because that is what the protocol says; this only decides what is painted. It lives
-	 * here rather than in the store that persists it, because the UI is what has units.
-	 */
+	/** The unit the panel shows temperature in. A display preference only: the sensor and the
+	 * Matter cluster stay Celsius. Persisted by prefs, not here. */
 	enum class TempUnit : uint8_t
 	{
 		Celsius,
 		Fahrenheit
 	};
 
-	/** What this build of the device can actually do.
-	 *
-	 * What the display needs to know, and nothing more. Which menu rows exist is NOT here any more:
-	 * the display draws whatever list of strings it is handed, and menu.cpp decides what is in it by
-	 * asking the app what the device can do. (There used to be a `factory_reset` flag here for
-	 * exactly that, and after the menu became a table nothing read it -- it was set in two places and
-	 * consulted in none.)
-	 */
+	/** What this build brought. Which menu rows exist is NOT the display's business -- it draws
+	 * whatever list it is handed. */
 	struct Config
 	{
-		/** Named on the boot splash, so a glance at the panel says which image is on the board. */
+		/** Named on the boot splash, so a glance says which image is on the board. */
 		const char *build = "Standalone";
 
-		/** Matter onboarding payload ("MT:..."), rendered as a QR. NULL in a build with no radio --
-		 * then there is no view behind the Matter row, no QR draw buffer (the single largest
-		 * allocation in the LVGL pool), no signal bars and no Matter mark. */
+		/** Matter onboarding payload ("MT:..."), rendered as a QR. NULL in a build with no radio:
+		 * then there is no pairing view, no QR draw buffer (the pool's largest allocation), no
+		 * signal bars, no Matter mark. */
 		const char *pair_qr = nullptr;
 
-		/** The same code for humans ("1234-567-8901"), drawn under the QR for when a camera will
-		 * not cooperate. Ignored if pair_qr is NULL. */
+		/** The same code for humans, drawn under the QR. Ignored if pair_qr is NULL. */
 		const char *pair_manual = nullptr;
 	};
 
-	/** Build all widgets and show the boot splash (one full refresh).
-	 *
-	 * @param cfg what this build brought; see Config
-	 *
-	 * @retval 0   the panel is ready and the splash is on screen
-	 * @retval -1  no display; every other function here becomes a no-op
-	 */
+	/** Build all widgets (resident, once) and show the boot splash.
+	 * @retval -1 no display; every other function becomes a no-op */
 	int init(const Config &cfg = {});
 
-	/** Select the Matter view.
-	 *
-	 * Two states, one screen, because they answer the same question -- "is this thing on my
-	 * network?". Uncommissioned it shows the QR and the manual code given to init(); commissioned
-	 * there is nothing to scan, so it says so, and offers the way back out of the network.
-	 * A no-op when init() was given no codes.
-	 *
-	 * @param commissioned whether the device is already on a fabric
-	 */
+	/** The Matter view: the QR while there is something to scan, "CONNECTED" once there is not.
+	 * No-op when init() was given no codes. */
 	void show_matter(bool commissioned);
 
-	/** Stage the battery indicator, shown on every view.
-	 *
-	 * @param pct      state of charge, 0..100 (clamped)
-	 * @param charging true to show the bolt instead of the number
-	 */
+	/** Battery indicator (status bar, every view). Charging shows the bolt instead of the number. */
 	void set_battery(uint8_t pct, bool charging);
 
-	/** Show the sensor view, with whatever readings it already holds.
-	 *
-	 * The one view the device returns to, so this is also how a menu, an error or the
-	 * low-battery warning is dismissed. Selecting a view is separate from filling it:
-	 * a measurement that arrives while another view is up must not yank the screen.
-	 */
+	/** Show the sensor view with whatever readings it holds. The one view the device returns to --
+	 * also how a menu or an error is dismissed. Selecting is separate from filling: a reading that
+	 * arrives while another view is up must not yank the screen. */
 	void show_sensor();
 
-	/** Stage the three readings, without selecting the view -- see show_sensor().
-	 * Values are deduped at display resolution, so a change too small to be shown
-	 * costs no e-paper refresh.
-	 *
-	 * @param co2_ppm   CO2 concentration in ppm
-	 * @param temp_x100 temperature in hundredths of a degree Celsius (may be negative)
-	 * @param hum_x100  relative humidity in hundredths of a percent
-	 */
+	/** Stage the readings (Celsius; the display converts). Deduped at displayed resolution, so a
+	 * change too small to show costs no refresh. */
 	void set_sensor(uint16_t co2_ppm, int32_t temp_x100, uint16_t hum_x100);
 
-	/** Change the unit temperature is shown in. Always pass Celsius readings to set_sensor(); this
-	 * decides only what is painted.
-	 *
-	 * Takes effect at once: the unit next to the number, the number itself (recomputed from the last
-	 * reading, so the panel never shows a Celsius figure under an F), and the Units menu row. Like
-	 * every other setter it only stages -- ui::refresh() puts it on the glass.
-	 *
-	 * It does not persist anything. prefs (src/prefs.cpp) is the store; this is the display.
-	 */
+	/** Change the displayed unit, effective immediately -- the number is repainted from the kept
+	 * reading, so the panel never shows a Celsius figure under an F. Does not persist anything. */
 	void set_temp_unit(TempUnit u);
 
-	/** The unit currently painted. The menu asks, so that a hold can toggle it. */
+	/** The unit currently painted. The menu asks, so a hold can toggle it. */
 	TempUnit temp_unit_shown();
 
-	/** Stage the signal bars in the status bar: how well the mesh hears this device.
-	 *
-	 * The panel's entire vocabulary for the radio. -1 draws nothing at all -- not joined, or joined
-	 * and not yet measured -- because an empty corner is the honest amount to say, and four hollow
-	 * outlines would claim "attached with no signal", a real and much worse state. 0 draws exactly
-	 * that state: four hollow outlines. 1..4 fill that many.
-	 *
-	 * Who earns how many bars is the caller's judgement (net quantizes, with hysteresis, from the
-	 * RSSI its hook reports); the panel just draws the count and dedups on it -- an unchanged count
-	 * costs no e-paper refresh.
-	 *
-	 * @param bars -1 to clear the corner, else 0..4
-	 */
+	/** Signal bars, the panel's whole radio vocabulary: -1 draws nothing (not joined, or not yet
+	 * measured -- four hollow outlines would claim "attached, no signal", a worse state), 0 draws
+	 * exactly those four hollow outlines, 1..4 fill that many. Who earns how many is the caller's
+	 * judgement (net quantizes with hysteresis); the panel dedups on the count. */
 	void set_signal_bars(int bars);
 
-	/** Select the error view and stage its text.
-	 *
-	 * @param title  headline, e.g. "SENSOR ERROR"; NULL keeps the previous one
-	 * @param detail second line; NULL clears it
-	 */
+	/** The error view. NULL title keeps the previous one; NULL detail clears it. */
 	void set_error(const char *title, const char *detail);
 
-	/** Select the factory-reset confirmation.
-	 *
-	 * A factory reset drops every fabric: the device leaves the network it is on, and whoever put
-	 * it there has to put it back. That is not undoable, and this device has one button -- so it
-	 * gets the same safety net as a recalibration, a screen that says what is about to happen and
-	 * makes the destructive answer the deliberate one (hold), not the reflex (tap).
-	 */
+	/** The factory-reset confirmation. A reset drops every fabric and cannot be undone, so the
+	 * destructive answer is the deliberate gesture (hold), not the reflex (tap). */
 	void set_reset_prompt();
 
-	/** Select the low-battery warning view.
-	 * It is another view of the same battery as the status bar, so it draws the
-	 * level last given to set_battery() -- call that first.
-	 */
+	/** The low-battery view. Draws the level last given to set_battery() -- call that first. */
 	void set_low_battery();
 
-	/** Select the menu view and stage its rows, with the cursor on one of them.
-	 *
-	 * There is ONE menu view, and it draws whatever list it is handed. It has no idea that a root
-	 * menu and a Calibrate sub-menu exist -- to the panel they are five strings and a cursor, twice,
-	 * and a second set of widgets for the second one would be a second copy of the first for no
-	 * reason. (There was one, briefly. It cost 1.7 KB of an LVGL pool that has 5 KB left, and it made
-	 * stepping into the sub-menu look like a view change, which on e-paper means a black flash.)
-	 *
-	 * Whose rows these are, and where the cursor was left in each, is menu.cpp's business.
-	 *
-	 * The whole list every time, labels and all -- a row that carries a value ("Altitude: 300 m") has
-	 * no other way to change. Nothing is redrawn that has not moved: an unchanged label and an
-	 * unchanged cursor leave the panel alone.
-	 *
-	 * @param labels   `count` strings, top to bottom; they need not outlive the call
-	 * @param count    how many rows, 1..LIST_MAX_ROWS (more is a programming error and is ignored)
-	 * @param selected the row drawn in reverse video, 0..count-1
-	 */
+	/** The menu view: `count` rows, cursor on `selected` (drawn in reverse video). ONE menu view
+	 * draws every list it is handed -- whose rows they are is menu.cpp's business. The whole list
+	 * every time (a row like "Altitude: 300 m" has no other way to change); unchanged labels and
+	 * cursor cost nothing. Lists longer than LIST_MAX_ROWS are refused. */
 	void show_list(const char *const *labels, int count, int selected);
 
-	/** Select the one-button number editor: a title, the value being turned, and what a tap does.
-	 *
-	 * One button cannot really enter a number, so it does not pretend to: a tap steps the value and
-	 * wraps at the end, and a hold keeps it. What makes that bearable is the second line -- for the
-	 * temperature offset it carries the reading as it stands right now, so the user turns the value
-	 * until the panel agrees with the thermometer in their hand, and never has to do arithmetic.
-	 *
-	 * @param title the setting, e.g. "TEMP OFFSET"
-	 * @param value the number as it should be read, e.g. "4.0"
-	 * @param unit  what it is measured in, e.g. "\xC2\xB0" "C" or "m"
-	 * @param sub   the line under it; NULL for none
-	 * @param hint  what the buttons do, e.g. "Tap = +0.5     Hold = save"
-	 */
+	/** The one-button number editor: title, the value being turned, its unit, an optional line
+	 * under it, and what the button does. The sub line is what makes one button bearable -- for
+	 * the offset it predicts the reading, so the user never does arithmetic. */
 	void set_value_edit(const char *title, const char *value, const char *unit, const char *sub,
 						const char *hint);
 
-	/** Select the calibration view: explain the one prerequisite, offer the way out.
-	 *
-	 * Forced recalibration teaches the sensor that the air it currently smells is
-	 * fresh outdoor air. Run indoors it miscalibrates the sensor for good, so this
-	 * screen is the whole safety net -- there is no second confirmation.
-	 */
+	/** The calibration prompt. Forced recalibration in the wrong air miscalibrates the sensor for
+	 * good; this screen is the whole safety net. */
 	void set_calib_prompt();
 
-	/** Stage the calibration progress.
-	 *
-	 * The SCD41 runs periodic measurement for three minutes: the datasheet wants it
-	 * measuring the target air in its normal operating mode before a forced
-	 * recalibration.
-	 *
-	 * A bar, not a seconds countdown. Every redraw costs a whole panel refresh, so the
-	 * display can only be updated every few seconds -- and a number showing seconds
-	 * promises to tick every one of them. A bar promises nothing but progress.
-	 *
-	 * @param pct how far along, 0..100 (clamped)
-	 */
+	/** Calibration progress, 0..100. A bar, not seconds: every redraw is a whole panel refresh, so
+	 * updates come every few seconds -- a bar promises nothing but progress. */
 	void set_calib_progress(uint8_t pct);
 
-	/** Commit every staged change with a single e-paper refresh.
-	 * Full refresh on a view change and periodically to clear ghosting, partial
-	 * otherwise. Does nothing if no setter changed anything.
-	 */
+	/** Commit every staged change with a single e-paper refresh: full on a view change and
+	 * periodically (ghosting), partial otherwise. Does nothing if nothing changed. */
 	void refresh();
 
-	/** Log how full the LVGL pool is.
-	 * Every view is built once and kept resident, so a pool that fits at boot fits
-	 * forever -- and running it dry is an MPU fault, not a graceful failure. The peak
-	 * also covers the transient glyph draw buffers a render allocates (b612_48 alone is
-	 * ~2 KB), which is the figure that says whether the pool is generously sized.
-	 *
-	 * A no-op wherever the pool cannot be weighed: the host sim runs LVGL on a 16 MB
-	 * malloc heap with 64-bit pointers, so a figure from there would be a
-	 * plausible-sounding lie.
-	 *
-	 * @param tag what had just happened, for the log line
-	 */
+	/** Log the LVGL pool (used/peak/free). Views are resident, so a pool that fits at boot fits
+	 * forever -- and running it dry is an MPU fault, not a graceful failure. Read this line after
+	 * adding a view or a font. No-op in the host sim, whose numbers would be lies. */
 	void log_pool(const char *tag);
 
 } // namespace ui

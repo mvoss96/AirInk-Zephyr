@@ -13,19 +13,9 @@
 #include "ui/display_ui.hpp"
 #include "ui/quantize.hpp"
 
-/* ============================================================================================
- * The menu, as data.
- *
- * Everything below the tables is machinery. Everything a person would want to change -- a new
- * setting, a new row, a different order -- is IN the tables. That is the whole point of them: the
- * menu had grown five kinds of entry (a sub-menu, a screen, a toggle, a number, a way out) and was
- * spelling each one out by hand, in a switch that got a new case per feature and in a display that
- * knew every entry by name. A second list would have been a second copy of both.
- *
- * So: a row says what KIND it is. The machinery knows how each kind behaves -- a toggle flips where
- * it stands and rewrites its own label, a number opens the one editor there is, a screen has its own
- * little flow -- and it knows it once.
- * ============================================================================================ */
+/* The menu, as data: everything a person would change -- a new setting, a new row, a different
+ * order -- is IN the tables below; everything under them is machinery that knows each row KIND
+ * (sub-menu, screen, toggle, number, way out) exactly once. */
 
 namespace
 {
@@ -33,13 +23,8 @@ namespace
 	constexpr int64_t PROMPT_IDLE_MS = 120000; // long enough to carry the device outside
 	constexpr int64_t CALIB_MS = 180000;	   // the datasheet's warm-up before an FRC
 
-	/* The bar advances in step with the sensor's own 5 s measurement interval: 36 steps
-	 * over the three minutes. A panel refresh costs ~3.0 mAs and takes 0.85 s, so this
-	 * adds ~108 mAs -- 4 % of the calibration -- while a per-second bar would spend
-	 * ~540 mAs and keep the panel running back-to-back. Note the bar is not cheaper than
-	 * the number it replaced: LV_Z_FULL_REFRESH means every flush writes the whole
-	 * panel, whatever changed. It is honest, not cheap: a number showing seconds
-	 * promises to tick every second, and could not keep that promise. */
+	/* The bar steps with the sensor's own 5 s interval: 36 refreshes x ~3 mAs = ~108 mAs, 4 % of
+	 * the calibration. A per-second bar would cost 5x that and keep the panel running non-stop. */
 	constexpr int64_t CALIB_DRAW_MS = 5000;
 
 	// ---- what a row can be ------------------------------------------------------------------
@@ -94,11 +79,9 @@ namespace
 
 	// ---- the toggles and the numbers, once each ---------------------------------------------
 	//
-	// A toggle or a number is a VIEW onto one stored setting. It says which setting, and how to show
-	// it; prefs does everything else -- clamps the value, writes it down, and puts it where it has to
-	// act. That is why there are no setters here any more. There used to be four, each with its own
-	// hand-written aftermath (tell the sensor, tell the panel, tell the network), and the fifth setting
-	// would have been free to forget one of them -- silently, because nothing checks an aftermath.
+	// A toggle or a number is a VIEW onto one stored setting: which one, and how to show it. prefs
+	// does everything else (clamp, save, apply) -- so there are no setters here to forget an
+	// aftermath in.
 
 	struct ToggleDef
 	{
@@ -119,26 +102,14 @@ namespace
 		void (*after)();				 // what only the MENU can know to do; nullptr = nothing
 	};
 
-	/** The last reading was taken under the old offset, and no measurement can happen while the menu is
-	 * up. Keeping it would make the editor predict against a number that is already wrong -- re-open it
-	 * after a save and it would quote the reading from before the change. Better to say "no reading
-	 * yet" for the half minute until there is one again.
-	 *
-	 * It lives here and not in prefs's aftermath because it is about the EDITOR, not about the setting:
-	 * the store has no idea anybody is predicting anything. */
+	/** The last reading predates the new offset (nothing measures while the menu is up), so the
+	 * editor must not predict against it. Menu's business, not prefs's: the store has no idea
+	 * anybody is predicting anything. */
 	void forget_reading() { app::forget_last_temp(); }
 
-	/** What the panel WILL say once a pending offset takes effect.
-	 *
-	 * This is the line that makes a one-button number bearable. The offset is a subtraction the
-	 * sensor performs, so raising it by half a degree lowers the next reading by half a degree --
-	 * which is arithmetic the user should not have to do while holding a thermometer. The panel does
-	 * it: they tap until this line agrees with what they are holding, and hold to keep it.
-	 *
-	 * It says "will read" and not "reads", because it is a prediction: the sensor is trimmed at once,
-	 * but the number on the sensor view is the last one measured, and the next measurement is up to
-	 * half a minute away.
-	 */
+	/** What the panel WILL say once the pending offset takes effect -- the user taps until this
+	 * agrees with the thermometer in their hand, instead of doing the subtraction themselves.
+	 * "Will", because the next measurement is up to half a minute away. */
 	const char *offset_sub(int pending_x10)
 	{
 		static char buf[40];
@@ -214,11 +185,8 @@ namespace
 		{Kind::Leave, "Back"},
 	};
 
-	/* Both lists are already AT the panel's limit, and draw() below fills fixed arrays of that size.
-	 * A sixth row -- which the header of this file cheerfully invites -- would write past the end of
-	 * them, and then show_list() would refuse the list and draw nothing, so the corruption would be
-	 * the only symptom. The panel's limit is a hard limit; say so here, where the row would be added.
-	 * (A list that genuinely needs six entries needs a sub-menu, which now costs one row.) */
+	/* Both lists are AT the panel's limit, and draw() fills fixed arrays of that size -- a sixth
+	 * row would write past them. A list that needs six entries needs a sub-menu (costs one row). */
 	static_assert(sizeof(ROOT) / sizeof(ROOT[0]) <= ui::LIST_MAX_ROWS, "the root menu is too long");
 	static_assert(sizeof(CALIBRATE) / sizeof(CALIBRATE[0]) <= ui::LIST_MAX_ROWS,
 				  "the Calibrate menu is too long");
@@ -294,15 +262,9 @@ namespace
 	 * or a tap would appear to do nothing. */
 	bool visible(const Row &r) { return r.present == nullptr || r.present(); }
 
-	/** Everything on screen, in one place: the rows that exist, their labels with their values in
-	 * them, and the cursor.
-	 *
-	 * The labels are rebuilt from the current values every time, which is what lets a toggle or a
-	 * saved number show up in its row without anything being told to go and rewrite it. show_list()
-	 * compares against what is already on the panel, so a list that has not changed costs nothing.
-	 *
-	 * @param sel which of the VISIBLE rows the cursor is on
-	 */
+	/** Draw the current list: visible rows, labels with their values baked in, cursor on `sel`
+	 * (counted over VISIBLE rows). Labels are rebuilt from the values every time -- that is how a
+	 * toggled row rewrites itself -- and show_list() dedups, so an unchanged list costs nothing. */
 	void draw(int sel)
 	{
 		const ListDef &def = LISTS[(int)list];
@@ -387,20 +349,10 @@ namespace
 	// ---- the screens, each with its own flow -------------------------------------------------
 
 	/** The Matter screen: the QR while there is something to scan, the state once there is not.
-	 *
-	 * It only ever tells you something, so any gesture takes you back. Leaving the network is a
-	 * menu entry of its own -- not a gesture hidden on a screen that reads like a status line.
-	 *
-	 * Showing the code also re-opens the commissioning window. The radio only listens for an hour
-	 * after boot, so on a device that has been sitting on a shelf the code alone would be a dead
-	 * letter -- putting it on the panel is the moment the user means to use it, so that is the
-	 * moment to listen.
-	 *
-	 * Leaving the screen does NOT close the window again, and that is on purpose: the user leaves
-	 * it precisely when they have just scanned the code, and the commissioner needs the next few
-	 * seconds to answer. Closing on the way out would abort the join it was opened for. The window
-	 * closes itself -- on success, or on its own timeout.
-	 */
+	 * Opening it also opens the commissioning window (the boot window lasts only an hour, and the
+	 * moment the code is on the panel is the moment somebody means to scan it). Leaving does NOT
+	 * close the window -- the user leaves right after scanning, and the commissioner needs the
+	 * next few seconds; it closes itself on success or timeout. */
 	void to_matter()
 	{
 		go(State::Matter);
@@ -412,11 +364,8 @@ namespace
 		ui::show_matter(net::commissioned());
 	}
 
-	/** Ask before dropping every network the device is on.
-	 *
-	 * The same safety net as the calibration prompt, for the same reason: one button, and an
-	 * answer that cannot be taken back. Tap is the reflex, so tap is the harmless one.
-	 */
+	/** Ask before dropping every network. One button, an answer that cannot be taken back: tap is
+	 * the reflex, so tap is the harmless one. */
 	void to_reset_prompt()
 	{
 		go(State::ResetPrompt);
@@ -431,13 +380,9 @@ namespace
 		ui::set_calib_prompt();
 	}
 
-	/** Show what went wrong and wait for the user to take note.
-	 *
-	 * Nothing was changed, so there is nothing to decide: any gesture dismisses this, and
-	 * so does the idle timeout, for a device left alone on a windowsill. The [CAL] log
-	 * line above the call says whether the sensor refused the air it measured or never
-	 * answered at all -- the screen only has room for the verdict.
-	 */
+	/** Show the verdict and wait for a gesture (or the idle timeout, for a device left on a
+	 * windowsill). Nothing was changed, so there is nothing to decide; the [CAL] log line above
+	 * each call carries the detail the screen has no room for. */
 	void to_calib_failed()
 	{
 		go(State::CalibFailed);
