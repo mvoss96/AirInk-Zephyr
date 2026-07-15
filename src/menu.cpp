@@ -23,6 +23,9 @@ namespace
 	constexpr int64_t PROMPT_IDLE_MS = 120000; // long enough to carry the device outside
 	constexpr int64_t CALIB_MS = 180000;	   // the datasheet's warm-up before an FRC
 
+	// Fresh outdoor air, the only concentration a user can reliably stand in.
+	constexpr uint16_t CALIB_TARGET_PPM = 420;
+
 	/* The bar steps with the sensor's own 5 s interval: 36 refreshes x ~3 mAs = ~108 mAs, 4 % of
 	 * the calibration. A per-second bar would cost 5x that and keep the panel running non-stop. */
 	constexpr int64_t CALIB_DRAW_MS = 5000;
@@ -125,8 +128,8 @@ namespace
 		const int32_t c_x100 = last - delta_x100;
 
 		// ...and shown in whatever unit the panel is in, because the thermometer in the user's hand
-		// is in that unit too.
-		if (ui::temp_unit_shown() == ui::TempUnit::Fahrenheit)
+		// is in that unit too. prefs is the authority on the unit; the panel is its mirror.
+		if ((ui::TempUnit)prefs::get(prefs::Unit) == ui::TempUnit::Fahrenheit)
 		{
 			snprintf(buf, sizeof(buf), "Will read %d \xC2\xB0"
 									   "F",
@@ -413,7 +416,7 @@ namespace
 	menu::Status finish_calib()
 	{
 		int16_t correction = 0;
-		if (scd41::calibrate_finish(menu::CALIB_TARGET_PPM, &correction) < 0)
+		if (scd41::calibrate_finish(CALIB_TARGET_PPM, &correction) < 0)
 		{
 			printk("[CAL] the sensor rejected the recalibration\n");
 			to_calib_failed();

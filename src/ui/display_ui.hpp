@@ -66,16 +66,13 @@ namespace ui
 	 * reading, so the panel never shows a Celsius figure under an F. Does not persist anything. */
 	void set_temp_unit(TempUnit u);
 
-	/** The unit currently painted. The menu asks, so a hold can toggle it. */
-	TempUnit temp_unit_shown();
-
 	/** Signal bars, the panel's whole radio vocabulary: -1 draws nothing (not joined, or not yet
 	 * measured -- four hollow outlines would claim "attached, no signal", a worse state), 0 draws
 	 * exactly those four hollow outlines, 1..4 fill that many. Who earns how many is the caller's
 	 * judgement (net quantizes with hysteresis); the panel dedups on the count. */
 	void set_signal_bars(int bars);
 
-	/** The error view. NULL title keeps the previous one; NULL detail clears it. */
+	/** The error view: a headline and a detail line, both required. */
 	void set_error(const char *title, const char *detail);
 
 	/** The factory-reset confirmation. A reset drops every fabric and cannot be undone, so the

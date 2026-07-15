@@ -18,9 +18,6 @@
  */
 namespace menu
 {
-	// Fresh outdoor air, the only concentration a user can reliably stand in.
-	constexpr uint16_t CALIB_TARGET_PPM = 420;
-
 	/** What proceed() wants the loop to do next. */
 	enum class Status : uint8_t
 	{

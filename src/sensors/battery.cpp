@@ -89,6 +89,11 @@ namespace
 	 * wider than the dither, narrower than anyone would miss. */
 	constexpr int PCT_DEADBAND = 2;
 
+	/* Low-battery latch: the gap absorbs the +-1 pp jitter (a flapping latch would be a
+	 * full-refresh black flash every 30 s); charging always releases it. */
+	constexpr uint8_t LOW_ENTER_PCT = 5;
+	constexpr uint8_t LOW_EXIT_PCT = 8;
+
 } // namespace
 
 int battery::init()

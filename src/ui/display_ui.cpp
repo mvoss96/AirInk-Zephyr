@@ -1043,11 +1043,6 @@ void ui::set_temp_unit(TempUnit u)
 	dirty = true;
 }
 
-ui::TempUnit ui::temp_unit_shown()
-{
-	return temp_unit;
-}
-
 void ui::set_error(const char *title, const char *detail)
 {
 	if (!ready)
@@ -1059,17 +1054,14 @@ void ui::set_error(const char *title, const char *detail)
 	/* Deduped against the label text (which IS the record of the glass): a dead sensor stages the
 	 * same two lines every 30 s, and refreshing for them cost +67 uA -- more than the idle floor --
 	 * in exactly the state where the battery must last until somebody looks. */
-	const char *t = title ? title : lv_label_get_text(err_title_lbl);
-	const char *d = detail ? detail : "";
-
-	if (strcmp(lv_label_get_text(err_title_lbl), t) != 0)
+	if (strcmp(lv_label_get_text(err_title_lbl), title) != 0)
 	{
-		lv_label_set_text(err_title_lbl, t);
+		lv_label_set_text(err_title_lbl, title);
 		dirty = true;
 	}
-	if (strcmp(lv_label_get_text(err_detail_lbl), d) != 0)
+	if (strcmp(lv_label_get_text(err_detail_lbl), detail) != 0)
 	{
-		lv_label_set_text(err_detail_lbl, d);
+		lv_label_set_text(err_detail_lbl, detail);
 		dirty = true;
 	}
 }

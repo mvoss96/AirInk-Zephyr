@@ -11,17 +11,11 @@
  */
 namespace battery
 {
-	// Low-battery latch with hysteresis; charging always releases it. The gap absorbs the +-1 pp
-	// jitter the smoothed percent keeps -- a flapping latch would be a full-refresh black flash
-	// every 30 s.
-	constexpr uint8_t LOW_ENTER_PCT = 5;
-	constexpr uint8_t LOW_EXIT_PCT = 8;
-
 	struct State
 	{
 		uint8_t pct;   // 0..100, EMA-smoothed
 		bool charging; // USB present (instantaneous, from the raw voltages)
-		bool low;      // latched; see LOW_ENTER_PCT / LOW_EXIT_PCT
+		bool low;      // latched with hysteresis (enter 5 %, exit 8 %); charging releases it
 	};
 
 	/** Configure both ADC channels. @retval -ENODEV SAADC not ready */
