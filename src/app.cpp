@@ -1,6 +1,5 @@
 #include "app.hpp"
 
-#include <stdlib.h>
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
@@ -18,20 +17,6 @@ static constexpr int TICK_MS = 30000;			// How often a measurement cycle runs
 static constexpr uint32_t CO2_EVERY_TICKS = 10; // Every tenth cycle is a full CO2 read; the others are T+RH only
 static uint32_t tick_count;						// cycles since boot, or since the last recalibration
 static uint16_t last_co2_ppm;					// held on screen between the five-minute CO2 reads
-
-/* The last temperature the sensor gave us, for the offset editor's prediction. INT32_MIN and not 0,
- * because 0.00 C is a temperature. */
-static int32_t last_temp = INT32_MIN;
-
-int32_t app::last_temp_x100()
-{
-	return last_temp;
-}
-
-void app::forget_last_temp()
-{
-	last_temp = INT32_MIN;
-}
 
 /** Read the SCD41 and put the numbers on screen. Every tenth call is the full CO2 single-shot,
  * the rest are ~1000x cheaper T+RH reads; the last CO2 value is held in between. A reading also
@@ -64,8 +49,6 @@ static void measure()
 	printk("%s CO2 %u ppm  T %s%d.%02d C  RH %d.%02d %%\n", full_co2 ? "[CO2]" : "[RHT]", r.co2_ppm,
 		   (r.temp_x100 < 0) ? "-" : "", t_abs / 100, t_abs % 100, r.hum_x100 / 100,
 		   r.hum_x100 % 100);
-
-	last_temp = r.temp_x100; // the offset editor predicts against this
 
 	ui::show_sensor();
 	ui::set_sensor(r.co2_ppm, r.temp_x100, r.hum_x100);

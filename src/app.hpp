@@ -15,14 +15,6 @@
  */
 namespace app
 {
-	/** The last reading in centi-Celsius, for the offset editor's "Will read" prediction.
-	 * INT32_MIN = no reading yet (0 is a temperature). */
-	int32_t last_temp_x100();
-
-	/** Drop the last reading. Called when the offset changes: the reading predates it, and no new
-	 * one can arrive while the menu is open -- better "no reading yet" than a wrong prediction. */
-	void forget_last_temp();
-
 	/** Bring up display, sensor, battery and button, then loop forever. A missing display or button
 	 * is survivable; a missing SCD41 parks the error view and blocks.
 	 * @param build_name names this build on the splash and in the boot log -- the two firmwares

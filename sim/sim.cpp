@@ -231,13 +231,13 @@ int main(int argc, char **argv)
 
 	// The one editor, behind any row that carries a number.
 	g_tick_ms += 100;
-	ui::set_value_edit("TEMP OFFSET", "4.0", "°" "C", "Will read 23.5 °" "C",
+	ui::set_value_edit("TEMP OFFSET", "4.0", "°" "C", "Subtracted from the reading",
 					   "Tap = +0.5     Hold = save");
 	ui::refresh();
 	snapshot("edit_offset");
 
 	g_tick_ms += 100;
-	ui::set_value_edit("TEMP OFFSET", "6.5", "°" "C", "Will read 21.0 °" "C",
+	ui::set_value_edit("TEMP OFFSET", "6.5", "°" "C", "Subtracted from the reading",
 					   "Tap = +0.5     Hold = save");
 	ui::refresh();
 	snapshot("edit_offset_turned");

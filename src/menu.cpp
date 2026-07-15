@@ -1,11 +1,9 @@
 #include "menu.hpp"
 
-#include "app.hpp"
 #include "net.hpp"
 
 #include <stdint.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <zephyr/kernel.h>
 
 #include "prefs.hpp"
@@ -101,51 +99,8 @@ namespace
 							// a value the editor offers but the store would refuse is a lie
 		uint8_t decimals;	// 1 -> the stored value is tenths
 		const char *hint;	// what a tap does
-		const char *(*sub)(int pending); // the line under the number; nullptr = none
-		void (*after)();				 // what only the MENU can know to do; nullptr = nothing
+		const char *sub;	// the line under the number; nullptr = none
 	};
-
-	/** The last reading predates the new offset (nothing measures while the menu is up), so the
-	 * editor must not predict against it. Menu's business, not prefs's: the store has no idea
-	 * anybody is predicting anything. */
-	void forget_reading() { app::forget_last_temp(); }
-
-	/** What the panel WILL say once the pending offset takes effect -- the user taps until this
-	 * agrees with the thermometer in their hand, instead of doing the subtraction themselves.
-	 * "Will", because the next measurement is up to half a minute away. */
-	const char *offset_sub(int pending_x10)
-	{
-		static char buf[40];
-
-		const int32_t last = app::last_temp_x100();
-		if (last == INT32_MIN)
-		{
-			return "No reading yet";
-		}
-
-		// The prediction, in Celsius: what was measured, less the change we are about to make.
-		const int32_t delta_x100 = (pending_x10 - prefs::get(prefs::TempOffset)) * 10;
-		const int32_t c_x100 = last - delta_x100;
-
-		// ...and shown in whatever unit the panel is in, because the thermometer in the user's hand
-		// is in that unit too. prefs is the authority on the unit; the panel is its mirror.
-		if ((ui::TempUnit)prefs::get(prefs::Unit) == ui::TempUnit::Fahrenheit)
-		{
-			snprintf(buf, sizeof(buf), "Will read %d \xC2\xB0"
-									   "F",
-					 (int)(ui::quantize_temp_f_x100(c_x100) / 100));
-		}
-		else
-		{
-			const int32_t q = ui::quantize_temp_x100(c_x100);
-			snprintf(buf, sizeof(buf), "Will read %d.%d \xC2\xB0"
-									   "C",
-					 (int)(q / 100), (int)(abs(q % 100) / 10));
-		}
-		return buf;
-	}
-
-	const char *altitude_sub(int) { return "Above sea level"; }
 
 	/* In enum order, and that order is the contract: C++ has no designated initialisers for arrays --
 	 * those are a C thing -- so the static_assert can only catch a missing entry, not a swapped one. */
@@ -163,9 +118,8 @@ namespace
 		{prefs::TempOffset, "TEMP OFFSET",
 		 "\xC2\xB0"
 		 "C",
-		 5, 1, "Tap = +0.5     Hold = save", offset_sub, forget_reading},
-		{prefs::Altitude, "ALTITUDE", "m", 100, 0, "Tap = +100     Hold = save", altitude_sub,
-		 nullptr},
+		 5, 1, "Tap = +0.5     Hold = save", "Subtracted from the reading"},
+		{prefs::Altitude, "ALTITUDE", "m", 100, 0, "Tap = +100     Hold = save", "Above sea level"},
 	};
 	static_assert(sizeof(NUMBERS) / sizeof(NUMBERS[0]) == (size_t)Number::Count,
 				  "a number with no definition");
@@ -437,7 +391,7 @@ namespace
 		char num[16];
 		ui::format_x100(num, sizeof(num), d.decimals == 1 ? pending * 10 : pending * 100, d.decimals);
 
-		ui::set_value_edit(d.title, num, d.unit, d.sub ? d.sub(pending) : nullptr, d.hint);
+		ui::set_value_edit(d.title, num, d.unit, d.sub, d.hint);
 	}
 
 	void to_editing(Number n)
@@ -565,11 +519,7 @@ menu::Status menu::proceed(button::Event e)
 		else if (e == button::Event::Long)
 		{
 			prefs::set(d.id, pending); // writes it down, and tells whoever else holds a copy
-			if (d.after)
-			{
-				d.after();
-			}
-			to_list(list); // straight back to the row, which now shows the new value
+			to_list(list);			   // straight back to the row, which now shows the new value
 		}
 		else if (now >= idle_at)
 		{
