@@ -46,7 +46,9 @@ namespace scd41
 	int sample(Scd41Reading *out);
 
 	/** T + RH only (command 0x2196): ~50 ms, ~1000x less energy than a full read. What the 30 s
-	 * tick uses between the five-minute CO2 reads. co2_ppm is set to 0. */
+	 * tick uses between the five-minute CO2 reads. co2_ppm carries the last full read's value --
+	 * the same kind of memory as the temperature's EMA -- or 0 before the first (and after a
+	 * recalibration, which disowns it). */
 	int sample_rht(Scd41Reading *out);
 
 	/** Enter periodic measurement, the mode a forced recalibration requires (a few minutes of

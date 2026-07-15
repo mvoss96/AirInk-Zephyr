@@ -16,12 +16,11 @@
 static constexpr int TICK_MS = 30000;			// How often a measurement cycle runs
 static constexpr uint32_t CO2_EVERY_TICKS = 10; // Every tenth cycle is a full CO2 read; the others are T+RH only
 static uint32_t tick_count;						// cycles since boot, or since the last recalibration
-static uint16_t last_co2_ppm;					// held on screen between the five-minute CO2 reads
 
 /** Read the SCD41 and put the numbers on screen. Every tenth call is the full CO2 single-shot,
- * the rest are ~1000x cheaper T+RH reads; the last CO2 value is held in between. A reading also
- * selects the sensor view, which is how the splash and a stale error go away. On a read error the
- * cadence does not advance, so the next call retries the same kind of read. */
+ * the rest are ~1000x cheaper T+RH reads (the sensor module carries the CO2 value across them).
+ * A reading also selects the sensor view, which is how the splash and a stale error go away. On a
+ * read error the cadence does not advance, so the next call retries the same kind of read. */
 static void measure()
 {
 	const bool full_co2 = (tick_count % CO2_EVERY_TICKS) == 0;
@@ -32,15 +31,6 @@ static void measure()
 		printk("SCD41: %s read failed\n", full_co2 ? "CO2" : "RHT");
 		ui::set_error("SENSOR ERROR", "SCD41 read failed");
 		return;
-	}
-
-	if (full_co2)
-	{
-		last_co2_ppm = r.co2_ppm;
-	}
-	else
-	{
-		r.co2_ppm = last_co2_ppm;
 	}
 
 	// %d.%02d with abs() on the fraction drops the sign for -1.00 < T < 0.00 -- integer division
@@ -192,7 +182,8 @@ static void app_loop()
 			{
 				if (status == menu::Status::Recalibrated)
 				{
-					// The retained CO2 value predates the correction, so the next read must be a full
+					// Restart the cadence: the recalibration disowned the sensor's held CO2 value
+					// (scd41 cleared it), so the very next read must be the full one.
 					tick_count = 0;
 				}
 				else if (status == menu::Status::FactoryReset && net::can_factory_reset())

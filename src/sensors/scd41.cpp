@@ -18,6 +18,11 @@ namespace
 	const struct i2c_dt_spec scd41_bus = I2C_DT_SPEC_GET(DT_NODELABEL(scd41));
 	Ema<1> temp_ema; // Lightest filter: a real step is ~90 % shown after ~3 ticks.
 
+	/* The last full read's CO2, carried into the cheap T+RH readings so every Scd41Reading is
+	 * complete -- the same kind of memory as temp_ema. Cleared by a recalibration, whose whole
+	 * point is that the old number no longer describes the air. */
+	uint16_t last_co2_ppm;
+
 	/** The SCD4x's CRC-8 over one 16-bit word: polynomial 0x31, init 0xFF, no final XOR.
 	 *
 	 * @param w the two data bytes, most significant first
@@ -150,7 +155,8 @@ int scd41::sample(Scd41Reading *out)
 	sensor_channel_get(scd41_dev, SENSOR_CHAN_AMBIENT_TEMP, &temp);
 	sensor_channel_get(scd41_dev, SENSOR_CHAN_HUMIDITY, &hum);
 
-	out->co2_ppm = (uint16_t)co2.val1;
+	last_co2_ppm = (uint16_t)co2.val1;
+	out->co2_ppm = last_co2_ppm;
 	out->temp_x100 = temp_ema.update(temp.val1 * 100 + temp.val2 / 10000);
 	out->hum_x100 = (uint16_t)(hum.val1 * 100 + hum.val2 / 10000);
 	return 0;
@@ -192,7 +198,7 @@ int scd41::sample_rht(Scd41Reading *out)
 	const uint16_t t_raw = ((uint16_t)rd[3] << 8) | rd[4];
 	const uint16_t h_raw = ((uint16_t)rd[6] << 8) | rd[7];
 	// SCD4x: T = -45 + 175*raw/65535 [C], RH = 100*raw/65535 [%].
-	out->co2_ppm = 0; // not measured in rht-only mode
+	out->co2_ppm = last_co2_ppm; // not measured in rht-only mode; the last full read stands in
 	out->temp_x100 = temp_ema.update(-4500 + (int32_t)(17500LL * t_raw / 65535));
 	out->hum_x100 = (uint16_t)(10000LL * h_raw / 65535);
 
@@ -233,6 +239,11 @@ int scd41::calibrate_finish(uint16_t target_ppm, int16_t *correction_ppm)
 		power_down(); // the driver only reaches its own on the success path
 		return -EIO;  // includes the sensor's own 0xFFFF "I do not believe that reading"
 	}
+
+	// The held CO2 value predates the correction and must not stand in for another reading. The
+	// caller is expected to take a full sample next (app restarts its cadence); until then a
+	// T+RH reading carries 0 rather than a number the recalibration just disowned.
+	last_co2_ppm = 0;
 
 	*correction_ppm = (int16_t)correction; // the driver already removed the 0x8000 bias
 	return 0;
