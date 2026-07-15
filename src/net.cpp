@@ -2,7 +2,7 @@
 
 #include <zephyr/kernel.h>
 
-#include "prefs.hpp"
+#include "ui/display_ui.hpp"
 #include "ui/quantize.hpp"
 
 namespace
@@ -134,30 +134,14 @@ void net::publish_battery(const battery::State &bat)
 	}
 }
 
-/** Adopt a unit the controller set: into prefs, which repaints and persists -- so the device boots
- * on the last thing anyone chose, wherever they chose it. adopt(), not set(): never tell the
- * network its own news. */
-static void pull_unit()
+bool net::unit_from_network(ui::TempUnit *out)
 {
-	if (!hooks.unit_from_network)
-	{
-		return; // no network, no second opinion
-	}
-
-	// The guard exists for the log line below; prefs would drop an unmoved value anyway.
-	ui::TempUnit u;
-	if (!hooks.unit_from_network(&u) || (int32_t)u == prefs::get(prefs::Unit))
-	{
-		return;
-	}
-
-	printk("[PREFS] temp unit %s (from the network)\n", u == ui::TempUnit::Fahrenheit ? "F" : "C");
-	prefs::adopt(prefs::Unit, (int32_t)u);
+	return hooks.unit_from_network && hooks.unit_from_network(out);
 }
 
 /** Ask the radio how well it is heard; onto the status bar as 0..4 bars, -1 for no link at all.
  * The quantizer's hysteresis memory lives here, at its only caller. */
-static void pull_signal()
+void net::poll_signal()
 {
 	// Only a LOST link empties the corner. A failed RSSI read on a live link leaves the bars
 	// standing -- the last measurement is still the best answer, and flapping costs ~3 mAs a go.
@@ -184,10 +168,4 @@ static void pull_signal()
 
 	prev_bars = bars;
 	ui::set_signal_bars(bars);
-}
-
-void net::poll()
-{
-	pull_unit();
-	pull_signal();
 }

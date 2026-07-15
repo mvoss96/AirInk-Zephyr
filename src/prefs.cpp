@@ -7,7 +7,8 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "net.hpp" // net::publish_unit -- the one setting the network keeps a copy of
+#include "net.hpp"			 // net::publish_unit -- the one setting the network keeps a copy of
+#include "ui/display_ui.hpp" // ui::set_temp_unit -- the panel mirrors the store
 
 namespace
 {
@@ -134,9 +135,13 @@ namespace
 		v = clamp(s, v);
 		if (v == read(s))
 		{
-			return; // nothing moved: no flash write, no I2C burst, no radio
+			return; // nothing moved: no flash write, no I2C burst, no radio, no log
 		}
 
+		if (!local)
+		{
+			printk("[PREFS] %s = %d (from the network)\n", s.key, (int)v);
+		}
 		write(s, v);
 		save(s);
 		s.apply(local);

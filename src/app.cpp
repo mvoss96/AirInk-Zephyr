@@ -108,6 +108,17 @@ static battery::State poll_battery()
 	return bat;
 }
 
+/** Adopt a unit the controller set. The loop is the bridge between net and prefs, so the two
+ * never call each other; prefs dedups, logs, and never echoes back to the network (adopt). */
+static void pull_unit()
+{
+	ui::TempUnit u;
+	if (net::unit_from_network(&u))
+	{
+		prefs::adopt(prefs::Unit, (int32_t)u);
+	}
+}
+
 /** A device that has never joined anything boots to its onboarding code; the radio is already
  * listening (CONFIG_CHIP_ENABLE_PAIRING_AUTOSTART). Nothing is measured meanwhile: a reading would
  * have nowhere to go and would repaint the panel for nothing. Two ways out, whichever comes first:
@@ -156,7 +167,8 @@ static void app_loop()
 	{
 		const int64_t now = k_uptime_get();
 		const battery::State bat = poll_battery();
-		net::poll(); // what the network has to say back: the unit, the signal strength
+		net::poll_signal(); // what the network has to say back...
+		pull_unit();		// ...and what it wants the panel to show
 
 		if (bat.low)
 		{

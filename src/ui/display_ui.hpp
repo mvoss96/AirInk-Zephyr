@@ -1,6 +1,8 @@
 #pragma once
 #include <stdint.h>
 
+#include "temp_unit.hpp" // ui::TempUnit
+
 /** @file
  * LVGL UI for the AirInk 4.2" 400x300 e-paper. A persistent status bar on top; below it exactly
  * one content view at a time.
@@ -17,14 +19,6 @@ namespace ui
 	/** Menu length limit. The panel decides this -- five 44 px rows fit above the hint line -- and
 	 * show_list() refuses anything longer rather than drawing rows over each other. */
 	constexpr int LIST_MAX_ROWS = 5;
-
-	/** The unit the panel shows temperature in. A display preference only: the sensor and the
-	 * Matter cluster stay Celsius. Persisted by prefs, not here. */
-	enum class TempUnit : uint8_t
-	{
-		Celsius,
-		Fahrenheit
-	};
 
 	/** What this build brought. Which menu rows exist is NOT the display's business -- it draws
 	 * whatever list it is handed. */

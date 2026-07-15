@@ -4,7 +4,7 @@
 
 #include "sensors/battery.hpp"
 #include "sensors/scd41.hpp"
-#include "ui/display_ui.hpp" // ui::TempUnit
+#include "ui/temp_unit.hpp" // ui::TempUnit
 
 /** @file
  * The device's edge to a network, whichever network that is.
@@ -87,6 +87,11 @@ namespace net
 	void factory_reset();
 	void publish_unit(ui::TempUnit u);
 
+	/** What unit the network thinks the panel should show (see Hooks::unit_from_network). The loop
+	 * polls this and hands the answer to prefs::adopt() -- the bridge lives in the loop so that
+	 * prefs and net never call each other. @return false = no network, or no unit to read */
+	bool unit_from_network(ui::TempUnit *out);
+
 	/** Publish when the CO2 is fresh or the displayed reading moved. Measured: publishing every
 	 * tick costs 14 days of battery; every tenth left the controller 5 min behind the panel. The
 	 * quantization decides WHEN, never WHAT -- the hook gets the full-resolution reading, and the
@@ -96,8 +101,7 @@ namespace net
 	/** The battery (and whatever rides along in the hook), every cycle. */
 	void publish_battery(const battery::State &bat);
 
-	/** Pull what the network has to say: the unit (adopted into prefs) and the signal strength
-	 * (onto the status bar). Polls, because neither has an event to subscribe to -- see the hooks.
-	 * Touches the panel: loop's thread only. */
-	void poll();
+	/** Pull the signal strength onto the status bar, once a cycle. A poll, because a signal
+	 * strength has no event to subscribe to. Touches the panel: loop's thread only. */
+	void poll_signal();
 }

@@ -2,7 +2,7 @@
 #include <stdint.h>
 
 #include "sensors/scd41.hpp" // scd41::Trim -- the sensor owns what a trim is
-#include "ui/display_ui.hpp" // ui::TempUnit -- the unit is a display preference
+#include "ui/temp_unit.hpp"	 // ui::TempUnit
 
 /** @file
  * The settings the user owns: kept across a reboot, and put where they have to act.
