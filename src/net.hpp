@@ -95,11 +95,11 @@ namespace net
 	 * prefs and net never call each other. @return false = no network, or no unit to read */
 	bool unit_from_network(ui::TempUnit *out);
 
-	/** Publish when the CO2 is fresh or the displayed reading moved. Measured: publishing every
-	 * tick costs 14 days of battery; every tenth left the controller 5 min behind the panel. The
-	 * quantization decides WHEN, never WHAT -- the hook gets the full-resolution reading, and the
-	 * threshold is in Celsius/whole percent regardless of the unit on the panel. */
-	void publish_reading(const Scd41Reading &r, bool fresh_co2);
+	/** Publish when the displayed reading changed -- CO2 to the ppm, T/RH to what the panel shows
+	 * (in Celsius/whole percent regardless of the unit on screen). Measured: publishing every tick
+	 * costs 14 days of battery. The dedup decides WHEN, never WHAT: the hook always gets the
+	 * full-resolution reading. */
+	void publish_reading(const Scd41Reading &r);
 
 	/** The battery, every cycle. */
 	void publish_battery(const battery::State &bat);

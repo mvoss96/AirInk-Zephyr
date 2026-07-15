@@ -22,7 +22,8 @@ namespace
 	 * being held -- and this is its only caller. -1 = the corner is empty. */
 	int prev_bars = -1;
 
-	/* What was last sent, quantized to what a person could tell apart. See publish_reading(). */
+	/* What was last sent, at the resolution the panel shows. See publish_reading(). */
+	uint16_t pub_co2_ppm;
 	int32_t pub_temp_x100;
 	uint16_t pub_hum_x100;
 	bool have_published;
@@ -106,24 +107,29 @@ void net::publish_unit(ui::TempUnit u)
 	}
 }
 
-void net::publish_reading(const Scd41Reading &r, bool fresh_co2)
+void net::publish_reading(const Scd41Reading &r)
 {
 	if (!hooks.reading)
 	{
 		return;
 	}
 
+	// The same key the panel dedups on: CO2 to the ppm, T and RH to what is displayed. So the
+	// controller and the panel change in the same moment, and neither ever hears about a change
+	// the other could not show.
 	const int32_t t_q = ui::quantize_temp_x100(r.temp_x100);
 	const uint16_t h_q = ui::quantize_hum_x100(r.hum_x100);
-	const bool moved = !have_published || t_q != pub_temp_x100 || h_q != pub_hum_x100;
 
-	if (fresh_co2 || moved)
+	if (have_published && r.co2_ppm == pub_co2_ppm && t_q == pub_temp_x100 && h_q == pub_hum_x100)
 	{
-		hooks.reading(r);
-		pub_temp_x100 = t_q;
-		pub_hum_x100 = h_q;
-		have_published = true;
+		return; // nothing a person could tell apart has changed
 	}
+
+	hooks.reading(r);
+	pub_co2_ppm = r.co2_ppm;
+	pub_temp_x100 = t_q;
+	pub_hum_x100 = h_q;
+	have_published = true;
 }
 
 void net::publish_battery(const battery::State &bat)

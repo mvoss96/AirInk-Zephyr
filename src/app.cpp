@@ -43,9 +43,8 @@ static void measure()
 	ui::set_sensor(r.co2_ppm, r.temp_x100, r.hum_x100);
 
 	// The network hears about it when there is something to say -- which is net's judgement, not
-	// ours (see net::publish_reading): a fresh CO2 number always goes, a temperature goes when it
-	// moved by more than the panel could show.
-	net::publish_reading(r, full_co2);
+	// ours: it publishes exactly when the displayed reading changed (see net::publish_reading).
+	net::publish_reading(r);
 
 	tick_count++;
 }
