@@ -94,7 +94,7 @@ static void app_loop(bool menu_active)
 		ui::set_battery(bat.pct, bat.charging);
 		net::publish_battery(bat);
 
-		net::poll_signal();
+		ui::set_signal_bars(net::poll_signal());
 
 		// Adopt a unit the controller set. The loop is the bridge between net and prefs, so the
 		// two never call each other; prefs dedups, logs, and never echoes back (adopt).

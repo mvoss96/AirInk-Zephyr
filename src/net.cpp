@@ -2,7 +2,6 @@
 
 #include <zephyr/kernel.h>
 
-#include "ui/display_ui.hpp"
 #include "ui/quantize.hpp"
 
 namespace
@@ -145,23 +144,21 @@ bool net::unit_from_network(ui::TempUnit *out)
 	return hooks.unit_from_network && hooks.unit_from_network(out);
 }
 
-/** Ask the radio how well it is heard; onto the status bar as 0..4 bars, -1 for no link at all.
- * The quantizer's hysteresis memory lives here, at its only caller. */
-void net::poll_signal()
+int net::poll_signal()
 {
-	// Only a LOST link empties the corner. A failed RSSI read on a live link leaves the bars
-	// standing -- the last measurement is still the best answer, and flapping costs ~3 mAs a go.
+	// Only a LOST link empties the corner.
 	if (!thread_up)
 	{
 		prev_bars = -1;
-		ui::set_signal_bars(-1);
-		return;
+		return prev_bars;
 	}
 
 	int8_t rssi;
 	if (!hooks.link_rssi || !hooks.link_rssi(&rssi))
 	{
-		return;
+		// A failed read on a live link: the last measurement is still the best answer there is,
+		// and returning it makes the caller's set_signal_bars() a dedup no-op.
+		return prev_bars;
 	}
 
 	const int bars = ui::quantize_signal_bars(rssi, prev_bars);
@@ -173,5 +170,5 @@ void net::poll_signal()
 	}
 
 	prev_bars = bars;
-	ui::set_signal_bars(bars);
+	return prev_bars;
 }

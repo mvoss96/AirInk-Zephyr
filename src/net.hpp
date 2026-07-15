@@ -104,7 +104,10 @@ namespace net
 	/** The battery, every cycle. */
 	void publish_battery(const battery::State &bat);
 
-	/** Pull the signal strength onto the status bar, once a cycle. A poll, because a signal
-	 * strength has no event to subscribe to. Touches the panel: loop's thread only. */
-	void poll_signal();
+	/** Ask the radio how well it is heard, once a cycle. A poll, because a signal strength has no
+	 * event to subscribe to. The judgement lives here -- quantization, hysteresis, only a lost
+	 * link clears the corner, a failed read keeps the last answer -- and putting the result on the
+	 * panel is the caller's line: net never touches the display.
+	 * @return what the status bar should show: -1 = nothing, else 0..4 bars */
+	int poll_signal();
 }
