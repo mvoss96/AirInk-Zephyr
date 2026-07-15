@@ -19,17 +19,9 @@ static constexpr uint32_t CO2_EVERY_TICKS = 10; // Every tenth cycle is a full C
 static uint32_t tick_count;						// cycles since boot, or since the last recalibration
 static uint16_t last_co2_ppm;					// held on screen between the five-minute CO2 reads
 
-// Not copied: a string literal, or the caller's static buffer (see app.hpp).
-static const char *build_name = "Standalone";
-
 /* The last temperature the sensor gave us, for the offset editor's prediction. INT32_MIN and not 0,
  * because 0.00 C is a temperature. */
 static int32_t last_temp = INT32_MIN;
-
-void app::set_build_name(const char *name)
-{
-	build_name = name;
-}
 
 int32_t app::last_temp_x100()
 {
@@ -257,7 +249,7 @@ static void app_loop()
 	}
 }
 
-void app::run()
+void app::run(const char *build_name)
 {
 	// What the panel needs. What the MENU offers is decided elsewhere -- it asks net::has_radio()
 	// and net::can_factory_reset() -- because a row exists when there is something behind it.

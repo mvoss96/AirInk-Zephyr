@@ -310,8 +310,7 @@ void AirInkThread(void *, void *, void *)
 		.link_rssi = LinkRssi,
 	};
 	::net::set_hooks(hooks);
-	::app::set_build_name("Matter over Thread");
-	::app::run(); /* never returns */
+	::app::run("Matter over Thread"); /* never returns */
 }
 
 } /* namespace */
