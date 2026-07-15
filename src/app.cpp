@@ -99,49 +99,12 @@ static void pull_unit()
 	}
 }
 
-/** A device that has never joined anything boots to its onboarding code; the radio is already
- * listening (CONFIG_CHIP_ENABLE_PAIRING_AUTOSTART). Nothing is measured meanwhile: a reading would
- * have nowhere to go and would repaint the panel for nothing. Two ways out, whichever comes first:
- * a fabric appears (scanned), or the button (declined -- then net cuts the boot window short).
- * A build with no codes returns at once. */
-static void onboarding()
-{
-	if (!net::has_radio() || net::commissioned())
-	{
-		return;
-	}
-
-	printk("[MTR] not commissioned; the panel shows the onboarding code\n");
-	ui::show_matter(false);
-
-	while (true)
-	{
-		poll_battery(); // the status bar stays honest while the code is up
-
-		// Kept current by the network's own threads (a fabric delegate on the Matter build);
-		// this loop only has to keep looking.
-		if (net::commissioned())
-		{
-			printk("[MTR] commissioned; on to the readings\n");
-			return;
-		}
-
-		ui::refresh(); // only actually repaints when the battery moved
-
-		if (wait(k_uptime_get() + TICK_MS) != button::Event::None)
-		{
-			printk("[MTR] onboarding code dismissed\n");
-			net::dismiss_pairing();
-			return;
-		}
-	}
-}
-
-/** The main app loop */
-static void app_loop()
+/** The main app loop.
+ * @param menu_active true when run() opened the boot onboarding screen (menu::enter_matter()) --
+ *                    the loop then starts inside the menu, exactly as if the user had opened it */
+static void app_loop(bool menu_active)
 {
 	int64_t next_measure = k_uptime_get(); // the first one is due at once
-	bool menu_active = false;
 	bool was_low = false; // so the low-battery state is announced once, not every 30 s
 	button::Event e = button::Event::None;
 
@@ -276,6 +239,15 @@ void app::run(const char *build_name)
 	}
 	ui::log_pool("boot splash"); // every view is built; this is the resident cost
 
-	onboarding(); // returns at once unless this is a radio build that has never been commissioned
-	app_loop();
+	/* A device that has never joined anything boots straight into the menu's Matter screen: the
+	 * QR is the one thing a factory-new device is for, and the menu machinery already holds a
+	 * screen without measuring. It leaves like any menu -- scanned or dismissed, on to the
+	 * readings. (The radio is already listening: CONFIG_CHIP_ENABLE_PAIRING_AUTOSTART.) */
+	const bool show_code = net::has_radio() && !net::commissioned();
+	if (show_code)
+	{
+		printk("[MTR] not commissioned; the panel shows the onboarding code\n");
+		menu::enter_matter();
+	}
+	app_loop(show_code);
 }

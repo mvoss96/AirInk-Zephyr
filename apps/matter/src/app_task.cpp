@@ -232,10 +232,11 @@ void OpenPairingWindow()
 	PlatformMgr().UnlockChipStack();
 }
 
-/* The user dismissed the boot onboarding screen: cut the autostart hour down to the same ten
- * minutes the menu grants. CHIP has no "shorten", so this closes and re-opens -- safe precisely
- * here, because nobody presses the button mid-scan; the menu's OpenPairingWindow deliberately does
- * NOT do this, since there it really could interrupt a PASE session. */
+/* The user dismissed the QR screen: cut the window down to ten minutes (for the boot autostart
+ * hour, that is a real cut; for a menu-opened window, a no-op). CHIP has no "shorten", so this
+ * closes and re-opens -- safe precisely here, because nobody presses the button mid-scan;
+ * OpenPairingWindow deliberately does NOT restart an open window, since there it really could
+ * interrupt a PASE session. */
 void ShortenPairingWindow()
 {
 	PlatformMgr().LockChipStack();

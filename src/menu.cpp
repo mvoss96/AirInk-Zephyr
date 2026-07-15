@@ -182,7 +182,8 @@ namespace
 	int cursor[(int)List::Count]; // where the user left each list
 
 	Number editing = Number::TempOffset;
-	int pending; // the value being turned, not yet saved
+	int pending;	// the value being turned, not yet saved
+	bool matter_qr; // which half of the Matter screen is up: the QR, or the CONNECTED status
 
 	int64_t idle_at;	  // every state that can be walked away from times out here
 	int64_t calib_end_at; // CalibRun sends the FRC here
@@ -305,20 +306,28 @@ namespace
 
 	// ---- the screens, each with its own flow -------------------------------------------------
 
-	/** The Matter screen: the QR while there is something to scan, the state once there is not.
-	 * Opening it also opens the commissioning window (the boot window lasts only an hour, and the
-	 * moment the code is on the panel is the moment somebody means to scan it). Leaving does NOT
-	 * close the window -- the user leaves right after scanning, and the commissioner needs the
-	 * next few seconds; it closes itself on success or timeout. */
+	/** The Matter screen, two halves by net::commissioned().
+	 *
+	 * The QR half: opening it also opens the commissioning window (the moment the code is on the
+	 * panel is the moment somebody means to scan it), and it has NO idle timeout -- an
+	 * uncommissioned device's one job is this code, and e-paper keeps it up for free. idle_at is
+	 * only the poll that lets proceed() notice a commissioner without a gesture.
+	 *
+	 * The CONNECTED half: a status page, read and left, on the usual prompt timeout. */
 	void to_matter()
 	{
 		go(State::Matter);
-		idle_at = k_uptime_get() + PROMPT_IDLE_MS;
-		if (!net::commissioned())
+		matter_qr = !net::commissioned();
+		if (matter_qr)
 		{
 			net::open_pairing();
+			idle_at = k_uptime_get() + MENU_IDLE_MS; // the poll, not a timeout
 		}
-		ui::show_matter(net::commissioned());
+		else
+		{
+			idle_at = k_uptime_get() + PROMPT_IDLE_MS;
+		}
+		ui::show_matter(!matter_qr);
 	}
 
 	/** Ask before dropping every network. One button, an answer that cannot be taken back: tap is
@@ -463,6 +472,16 @@ void menu::enter()
 	to_list(List::Root);
 }
 
+void menu::enter_matter()
+{
+	for (int &c : cursor)
+	{
+		c = 0;
+	}
+	list = List::Root;
+	to_matter();
+}
+
 void menu::abort()
 {
 	if (state == State::CalibRun)
@@ -574,9 +593,29 @@ menu::Status menu::proceed(button::Event e)
 		return Status::Running;
 
 	case State::Matter:
-		// An onboarding code left on an e-paper panel is a code left on display, so the idle
-		// timeout matters here as much as the gesture -- and both go back to the menu, whose own
-		// timeout then closes it soon after.
+		if (matter_qr)
+		{
+			/* The QR half. Scanned? The payoff is the readings, not a status page. Declined? Cut
+			 * the advertising window short and get on with the readings too. Either way the menu
+			 * is done -- this is the one screen that exits to the sensor view directly. */
+			if (net::commissioned())
+			{
+				printk("[MTR] commissioned; on to the readings\n");
+				return Status::Exited;
+			}
+			if (e != button::Event::None)
+			{
+				printk("[MTR] onboarding code dismissed\n");
+				net::dismiss_pairing();
+				return Status::Exited;
+			}
+			if (now >= idle_at)
+			{
+				idle_at = now + MENU_IDLE_MS; // re-arm the commissioner poll; never a timeout
+			}
+			return Status::Running;
+		}
+		// The CONNECTED half: any gesture or the timeout goes back to the list.
 		if (e != button::Event::None || now >= idle_at)
 		{
 			to_list(list);

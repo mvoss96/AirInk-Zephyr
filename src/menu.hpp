@@ -13,8 +13,8 @@
  *
  * The shape: tap = next row, hold = activate, 30 s idle = out. A Toggle flips in place; a Number
  * opens the one editor (tap steps and wraps, hold saves, idle discards); a Screen runs its own
- * little flow and ends up back in the list -- except a completed calibration and a confirmed
- * factory reset, which leave the menu via Status below.
+ * little flow and ends up back in the list -- except a completed calibration, a confirmed factory
+ * reset, and the Matter QR (scanned or dismissed), which leave the menu via Status below.
  */
 namespace menu
 {
@@ -29,6 +29,11 @@ namespace menu
 
 	/** Open the menu on its first entry. */
 	void enter();
+
+	/** Open the menu directly on the Matter screen -- the boot onboarding of a device that has
+	 * never been commissioned. From there it behaves like any menu: the loop drives it with
+	 * proceed(), and it exits (scanned, or dismissed) to the readings. */
+	void enter_matter();
 
 	/** Advance the menu: one gesture, plus whatever its own clock says. Safe with Event::None --
 	 * that is how countdowns and idle timeouts get their turn. */

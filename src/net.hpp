@@ -37,8 +37,10 @@ namespace net
 		 * shows a QR nothing will answer. Idempotent. */
 		void (*pairing_open)();
 
-		/** The user dismissed the boot onboarding screen: cut the boot window short, but do not
-		 * close it -- they may be fetching their phone. Never called once a fabric exists. */
+		/** The user dismissed the QR screen on a device with no fabric: cut the advertising window
+		 * short, but do not close it -- they may be fetching their phone. (Cutting a menu-opened
+		 * 10-minute window to 10 minutes is a harmless no-op; the hour the boot opened is the
+		 * case that matters.) Never called once a fabric exists. */
 		void (*pairing_dismissed)();
 
 		/** Tell the network the panel's unit. Also called at boot (via prefs::apply_all()), which
