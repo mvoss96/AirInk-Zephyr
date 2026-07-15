@@ -51,13 +51,8 @@ static void measure()
 	tick_count++;
 }
 
-/* Raised from the POWER interrupt when the USB cable moves. */
+/* Given from the POWER interrupt when the USB cable moves (see battery::watch_supply). */
 static K_SEM_DEFINE(supply_changed, 0, 1);
-
-static void on_supply_change()
-{
-	k_sem_give(&supply_changed);
-}
 
 /** Sleep until the button, the USB cable, or the deadline. The cable wakes us so the charging
  * bolt tracks it immediately instead of lagging a 30 s cycle; an early wake needs no special case
@@ -272,7 +267,7 @@ void app::run(const char *build_name)
 	{
 		printk("Battery ADC not ready (continuing without it)\n");
 	}
-	else if (battery::watch_supply(on_supply_change) < 0)
+	else if (battery::watch_supply(&supply_changed) < 0)
 	{
 		// Survivable: the bolt then appears and clears on the next cycle, up to 30 s late,
 		// which is how it behaved before this existed.

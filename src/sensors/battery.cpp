@@ -11,23 +11,19 @@
 
 namespace
 {
-	// Whoever wants to know the moment the cable moves. Null until watch_supply().
-	void (*supply_cb)();
+	// Whoever wants waking the moment the cable moves. Null until watch_supply().
+	struct k_sem *wake_sem;
 
-	/** The SoC saw VBUS appear or disappear.
-	 *
-	 * Runs in the POWER interrupt (shared with the clock driver, which is what already owns
-	 * the vector), so it does the one thing an ISR may do here: hand the news on. Reading the
-	 * ADC or touching the panel from here would be a fault.
-	 */
+	/** The SoC saw VBUS appear or disappear. Runs in the POWER interrupt (shared with the clock
+	 * driver), so it does the one thing an ISR may: give the semaphore. */
 	void on_usb_evt(nrfx_power_usb_evt_t event)
 	{
 		// READY means the USB regulator settled; the cable did not move, so nothing to say.
-		if (event == NRFX_POWER_USB_EVT_READY || supply_cb == nullptr)
+		if (event == NRFX_POWER_USB_EVT_READY || wake_sem == nullptr)
 		{
 			return;
 		}
-		supply_cb();
+		k_sem_give(wake_sem);
 	}
 
 	// [0] = external divider (P0.31, x4), [1] = internal VDDH/5 (x5).
@@ -113,9 +109,9 @@ int battery::init()
 	return 0;
 }
 
-int battery::watch_supply(void (*on_change)())
+int battery::watch_supply(struct k_sem *wake)
 {
-	supply_cb = on_change;
+	wake_sem = wake;
 
 	/* nrfx_power_init() WRITES DCDCEN from its config. Zephyr already enabled the DC/DC converters,
 	 * and a zeroed config would switch them back off -- hundreds of microamps of regression. So

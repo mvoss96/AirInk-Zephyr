@@ -1,6 +1,8 @@
 #pragma once
 #include <stdint.h>
 
+struct k_sem;
+
 /** @file
  * Battery monitor: state of charge, USB charge detection, and the low-battery latch.
  *
@@ -21,10 +23,11 @@ namespace battery
 	/** Configure both ADC channels. @retval -ENODEV SAADC not ready */
 	int init();
 
-	/** Call back the instant USB power appears or disappears (POWER interrupt: wake somebody,
-	 * touch nothing else). Without it the charging bolt lags by up to one 30 s cycle.
+	/** Give this semaphore the instant USB power appears or disappears (from the POWER interrupt
+	 * -- a semaphore because that is all an ISR may safely do). Without it the charging bolt lags
+	 * by up to one 30 s cycle.
 	 * @retval negative: no VBUS events; the bolt then updates on the next cycle as it used to */
-	int watch_supply(void (*on_change)());
+	int watch_supply(struct k_sem *wake);
 
 	/** Read both channels and derive the state. The first call seeds the smoothing filter; a
 	 * failed conversion logs and returns the previous state unchanged, latch included. */
