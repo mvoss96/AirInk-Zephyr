@@ -78,16 +78,6 @@ static button::Event wait(int64_t deadline_ms)
 	return button::wait_until(0); // a gesture if k_poll found one; None otherwise
 }
 
-/** Read the battery, stage it, tell the network. Every pass of every loop starts here. */
-static battery::State poll_battery()
-{
-	const battery::State bat = battery::read();
-	ui::set_battery(bat.pct, bat.charging);
-
-	net::publish_battery(bat);
-	return bat;
-}
-
 /** Adopt a unit the controller set. The loop is the bridge between net and prefs, so the two
  * never call each other; prefs dedups, logs, and never echoes back to the network (adopt). */
 static void pull_unit()
@@ -111,7 +101,11 @@ static void app_loop(bool menu_active)
 	while (true)
 	{
 		const int64_t now = k_uptime_get();
-		const battery::State bat = poll_battery();
+
+		const battery::State bat = battery::read();
+		ui::set_battery(bat.pct, bat.charging);
+		net::publish_battery(bat);
+
 		net::poll_signal(); // what the network has to say back...
 		pull_unit();		// ...and what it wants the panel to show
 
