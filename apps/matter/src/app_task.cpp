@@ -127,6 +127,9 @@ void PublishReading(const Scd41Reading &r)
 void PublishBattery(const battery::State &bat)
 {
 	PlatformMgr().LockChipStack();
+	/* The cell terminal voltage, in mV (batVoltage is int32u mV). Reads the true cell even on USB:
+	 * the divider sits on BAT+, not the supply rail. */
+	PowerSource::Attributes::BatVoltage::Set(kPowerSourceEndpointId, bat.mv);
 	/* Matter counts the battery in half percent. */
 	PowerSource::Attributes::BatPercentRemaining::Set(kPowerSourceEndpointId,
 							  static_cast<uint8_t>(bat.pct * 2));

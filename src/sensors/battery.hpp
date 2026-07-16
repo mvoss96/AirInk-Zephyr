@@ -15,6 +15,7 @@ namespace battery
 {
 	struct State
 	{
+		uint16_t mv;   // cell terminal voltage in mV, EMA-smoothed (the gauge's own input)
 		uint8_t pct;   // 0..100, EMA-smoothed
 		bool charging; // USB present (instantaneous, from the raw voltages)
 		bool low;      // latched with hysteresis (enter 5 %, exit 8 %); charging releases it

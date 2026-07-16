@@ -85,6 +85,10 @@ namespace
 	 * wider than the dither, narrower than anyone would miss. */
 	constexpr int PCT_DEADBAND = 2;
 
+	/* Deadband on the PUBLISHED cell voltage (batVoltage). The gauge uses the un-deadbanded mV; this
+	 * only coarsens what a Matter subscriber sees, so its dither does not report every cycle. */
+	constexpr int32_t VMV_DEADBAND = 16;
+
 	/* Low-battery latch: the gap absorbs the +-1 pp jitter (a flapping latch would be a
 	 * full-refresh black flash every 30 s); charging always releases it. */
 	constexpr uint8_t LOW_ENTER_PCT = 5;
@@ -150,9 +154,20 @@ battery::State battery::read()
 	// is the only use of the internal channel; its voltage goes no further.
 	state.charging = (int_raw - ext_raw) > CHARGE_DETECT_MV;
 
+	// The smoothed cell voltage feeds the gauge at full resolution; the value we PUBLISH (batVoltage)
+	// gets its own deadband, or the ADC's ~mV dither would fire a Matter report almost every 30 s
+	// cycle -- the per-tick reporting cost publish_reading() exists to avoid (see power-active-energy).
+	// A discharge spans ~900 mV over months, so 16 mV steps still trace the curve at negligible cost.
+	const int32_t smoothed_mv = ext_mv_ema.update(ext_raw);
+	if (!pct_seeded || smoothed_mv >= (int32_t)state.mv + VMV_DEADBAND ||
+	    smoothed_mv <= (int32_t)state.mv - VMV_DEADBAND)
+	{
+		state.mv = (uint16_t)smoothed_mv;
+	}
+
 	// Signed, because the comparison is what the deadband is: an unsigned `state.pct - 1` at
 	// 0 % would wrap to 255 and the gauge would stick there forever.
-	const int fresh_pct = mv_to_percent(ext_mv_ema.update(ext_raw));
+	const int fresh_pct = mv_to_percent(smoothed_mv);
 	if (!pct_seeded)
 	{
 		state.pct = (uint8_t)fresh_pct;

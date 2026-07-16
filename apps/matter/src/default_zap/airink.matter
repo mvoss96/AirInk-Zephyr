@@ -651,6 +651,32 @@ cluster BasicInformation = 40 {
   command MfgSpecificPing(): DefaultSuccess = 0;
 }
 
+/** Nodes should be expected to be deployed to any and all regions of the world. These global regions
+      may have differing preferences for the units in which values are conveyed in communication to a
+      user. As such, Nodes that visually or audibly convey measurable values to the user need a
+      mechanism by which they can be configured to use a user’s preferred unit. */
+cluster UnitLocalization = 45 {
+  revision 2;
+
+  enum TempUnitEnum : enum8 {
+    kFahrenheit = 0;
+    kCelsius = 1;
+    kKelvin = 2;
+  }
+
+  bitmap Feature : bitmap32 {
+    kTemperatureUnit = 0x1;
+  }
+
+  attribute access(write: manage) optional TempUnitEnum temperatureUnit = 0;
+  provisional readonly attribute optional TempUnitEnum supportedTemperatureUnits[] = 1;
+  readonly attribute command_id generatedCommandList[] = 65528;
+  readonly attribute command_id acceptedCommandList[] = 65529;
+  readonly attribute attrib_id attributeList[] = 65531;
+  readonly attribute bitmap32 featureMap = 65532;
+  readonly attribute int16u clusterRevision = 65533;
+}
+
 /** This cluster is used to describe the configuration and capabilities of a physical power source that provides power to the Node. */
 cluster PowerSource = 47 {
   revision 3;
@@ -2108,10 +2134,21 @@ endpoint 0 {
     callback attribute clusterRevision;
   }
 
+  server cluster UnitLocalization {
+    callback attribute temperatureUnit;
+    callback attribute supportedTemperatureUnits;
+    callback attribute generatedCommandList;
+    callback attribute acceptedCommandList;
+    callback attribute attributeList;
+    ram      attribute featureMap default = 0x1;
+    ram      attribute clusterRevision default = 1;
+  }
+
   server cluster PowerSource {
     ram      attribute status;
     ram      attribute order default = 0;
     ram      attribute description default = "Primary Battery";
+    ram      attribute batVoltage;
     ram      attribute batPercentRemaining;
     ram      attribute batChargeLevel;
     ram      attribute batReplacementNeeded default = 0;
