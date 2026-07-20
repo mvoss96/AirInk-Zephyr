@@ -140,6 +140,11 @@ int battery::watch_supply(struct k_sem *wake)
 	return 0;
 }
 
+bool battery::charging()
+{
+	return state.charging;
+}
+
 battery::State battery::read()
 {
 	int32_t ext_raw, int_raw;

@@ -21,10 +21,11 @@ namespace menu
 	/** What proceed() wants the loop to do next. */
 	enum class Status : uint8_t
 	{
-		Running,	  // still inside
-		Exited,		  // show the readings again
-		Recalibrated, // as Exited, but the retained CO2 value predates the correction
-		FactoryReset  // confirmed; the loop hands it to net::factory_reset()
+		Running,	   // still inside
+		Exited,		   // show the readings again
+		Recalibrated,  // as Exited, but the retained CO2 value predates the correction
+		FactoryReset,  // confirmed; the loop hands it to net::factory_reset()
+		FirmwareUpdate // confirmed; the loop reboots into the UF2 bootloader
 	};
 
 	/** Open the menu on its first entry. */

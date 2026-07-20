@@ -7,6 +7,7 @@
 #include <zephyr/kernel.h>
 
 #include "prefs.hpp"
+#include "sensors/battery.hpp"
 #include "sensors/scd41.hpp"
 #include "ui/display_ui.hpp"
 #include "ui/quantize.hpp"
@@ -37,6 +38,7 @@ namespace
 	{
 		Root,
 		Calibrate,
+		System,
 		Count,
 	};
 
@@ -54,6 +56,7 @@ namespace
 		CalibCo2,
 		Matter,
 		FactoryReset,
+		FwUpdate,
 	};
 
 	enum class Toggle : uint8_t
@@ -126,11 +129,15 @@ namespace
 
 	// ---- THE MENU ---------------------------------------------------------------------------
 
+	/* Both System rows can be absent, and a sub-menu holding nothing but "Back" is a row that
+	 * punishes whoever taps it -- so the row into it answers the same question its contents do. */
+	bool has_system_rows() { return battery::charging() || net::can_factory_reset(); }
+
 	const Row ROOT[] = {
 		{Kind::Submenu, "Calibrate", (uint8_t)List::Calibrate},
 		{Kind::Toggle, "Units", (uint8_t)Toggle::Units},
 		{Kind::Screen, "Matter", (uint8_t)Screen::Matter, net::has_radio},
-		{Kind::Screen, "Factory reset", (uint8_t)Screen::FactoryReset, net::can_factory_reset},
+		{Kind::Submenu, "System", (uint8_t)List::System, has_system_rows},
 		{Kind::Leave, "Exit"},
 	};
 
@@ -142,11 +149,21 @@ namespace
 		{Kind::Leave, "Back"},
 	};
 
+	/* The update row exists only while USB is plugged: the UF2 drive it reboots into needs the
+	 * cable anyway, and without one the device would sit in the bootloader until a manual reset. */
+	const Row SYSTEM[] = {
+		{Kind::Screen, "Firmware update", (uint8_t)Screen::FwUpdate, battery::charging},
+		{Kind::Screen, "Factory reset", (uint8_t)Screen::FactoryReset, net::can_factory_reset},
+		{Kind::Leave, "Back"},
+	};
+
 	/* Both lists are AT the panel's limit, and draw() fills fixed arrays of that size -- a sixth
 	 * row would write past them. A list that needs six entries needs a sub-menu (costs one row). */
 	static_assert(sizeof(ROOT) / sizeof(ROOT[0]) <= ui::LIST_MAX_ROWS, "the root menu is too long");
 	static_assert(sizeof(CALIBRATE) / sizeof(CALIBRATE[0]) <= ui::LIST_MAX_ROWS,
 				  "the Calibrate menu is too long");
+	static_assert(sizeof(SYSTEM) / sizeof(SYSTEM[0]) <= ui::LIST_MAX_ROWS,
+				  "the System menu is too long");
 
 	struct ListDef
 	{
@@ -158,6 +175,7 @@ namespace
 	const ListDef LISTS[] = {
 		/* Root      */ {ROOT, (int)(sizeof(ROOT) / sizeof(ROOT[0])), List::Root},
 		/* Calibrate */ {CALIBRATE, (int)(sizeof(CALIBRATE) / sizeof(CALIBRATE[0])), List::Root},
+		/* System    */ {SYSTEM, (int)(sizeof(SYSTEM) / sizeof(SYSTEM[0])), List::Root},
 	};
 	static_assert(sizeof(LISTS) / sizeof(LISTS[0]) == (size_t)List::Count,
 				  "a list with no definition");
@@ -174,6 +192,7 @@ namespace
 		CalibFailed,
 		Matter,
 		ResetPrompt,
+		UpdatePrompt,
 		Editing, // the number editor; `editing` says which number
 	};
 
@@ -198,6 +217,7 @@ namespace
 		case State::CalibFailed: return "calib-failed";
 		case State::Matter: return "matter";
 		case State::ResetPrompt: return "reset-prompt";
+		case State::UpdatePrompt: return "update-prompt";
 		case State::Editing: return "editing";
 		default: return "list";
 		}
@@ -339,6 +359,15 @@ namespace
 		ui::set_reset_prompt();
 	}
 
+	/** Ask before rebooting into the UF2 bootloader. Same one-button grammar as the reset prompt:
+	 * tap is the reflex, so tap backs out. */
+	void to_update_prompt()
+	{
+		go(State::UpdatePrompt);
+		idle_at = k_uptime_get() + MENU_IDLE_MS;
+		ui::set_error("FIRMWARE UPDATE", "HOLD TO START");
+	}
+
 	void to_calib_prompt()
 	{
 		go(State::CalibPrompt);
@@ -445,6 +474,7 @@ namespace
 			case Screen::CalibCo2: to_calib_prompt(); break;
 			case Screen::Matter: to_matter(); break;
 			case Screen::FactoryReset: to_reset_prompt(); break;
+			case Screen::FwUpdate: to_update_prompt(); break;
 			}
 			return menu::Status::Running;
 
@@ -627,6 +657,18 @@ menu::Status menu::proceed(button::Event e)
 		{
 			printk("[UI] factory reset confirmed\n");
 			return Status::FactoryReset;
+		}
+		if (e != button::Event::None || now >= idle_at)
+		{
+			to_list(list);
+		}
+		return Status::Running;
+
+	case State::UpdatePrompt:
+		if (e == button::Event::Long)
+		{
+			printk("[UI] firmware update confirmed\n");
+			return Status::FirmwareUpdate;
 		}
 		if (e != button::Event::None || now >= idle_at)
 		{

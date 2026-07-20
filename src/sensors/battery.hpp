@@ -33,4 +33,7 @@ namespace battery
 	/** Read both channels and derive the state. The first call seeds the smoothing filter; a
 	 * failed conversion logs and returns the previous state unchanged, latch included. */
 	State read();
+
+	/** The last read()'s USB verdict, no ADC touched -- shaped for a menu row's present(). */
+	bool charging();
 }
