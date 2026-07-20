@@ -3,6 +3,9 @@
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
+#include <zephyr/sys/reboot.h>
+
+#include <hal/nrf_power.h>
 
 #include "input/button.hpp"
 #include "menu.hpp"
@@ -13,17 +16,20 @@
 #include "ui/display_ui.hpp"
 #include "version.hpp"
 
-static constexpr int TICK_MS = 30000;			// How often a measurement cycle runs
-static constexpr uint32_t CO2_EVERY_TICKS = 10; // Every tenth cycle is a full CO2 read; the others are T+RH only
-static uint32_t tick_count;						// cycles since boot, or since the last recalibration
+static constexpr int TICK_MS = 30000;				// How often a measurement cycle runs
+static constexpr uint32_t CO2_EVERY_TICKS = 10;		// On battery, every tenth cycle is a full CO2 read
+static constexpr uint32_t CO2_EVERY_TICKS_USB = 2;	// On USB power, every other one -- the cable pays
+static uint32_t tick_count;							// cycles since boot, or since the last recalibration
 
-/** Read the SCD41 and put the numbers on screen. Every tenth call is the full CO2 single-shot,
- * the rest are ~1000x cheaper T+RH reads (the sensor module carries the CO2 value across them).
- * A reading also selects the sensor view, which is how the splash and a stale error go away. On a
- * read error the cadence does not advance, so the next call retries the same kind of read. */
-static void measure()
+/** Read the SCD41 and put the numbers on screen. Every tenth call (every other on USB power) is
+ * the full CO2 single-shot, the rest are ~1000x cheaper T+RH reads (the sensor module carries the
+ * CO2 value across them). A reading also selects the sensor view, which is how the splash and a
+ * stale error go away. On a read error the cadence does not advance, so the next call retries the
+ * same kind of read. */
+static void measure(bool usb)
 {
-	const bool full_co2 = (tick_count % CO2_EVERY_TICKS) == 0;
+	const uint32_t n = usb ? CO2_EVERY_TICKS_USB : CO2_EVERY_TICKS;
+	const bool full_co2 = (tick_count % n) == 0;
 
 	Scd41Reading r{};
 	if ((full_co2 ? scd41::sample(&r) : scd41::sample_rht(&r)) != 0)
@@ -137,6 +143,16 @@ static void app_loop(bool menu_active)
 					printk("[UI] factory reset\n");
 					net::factory_reset();
 				}
+				else if (status == menu::Status::FirmwareUpdate)
+				{
+					// Painted BEFORE the reset: e-paper holds it unpowered, so the hint stands
+					// for as long as the UF2 drive is open -- a bootloader screen for free.
+					ui::set_error("FIRMWARE UPDATE", "COPY UF2 TO NICENANO");
+					ui::refresh();
+					printk("[UI] rebooting into the UF2 bootloader\n");
+					NRF_POWER->GPREGRET = 0x57; // DFU_MAGIC_UF2_RESET; survives the soft reset
+					sys_reboot(SYS_REBOOT_COLD);
+				}
 				else
 				{
 					ui::show_sensor();
@@ -152,7 +168,7 @@ static void app_loop(bool menu_active)
 		}
 		else if (now >= next_measure)
 		{
-			measure();
+			measure(bat.charging);
 			next_measure = now + TICK_MS;
 		}
 
