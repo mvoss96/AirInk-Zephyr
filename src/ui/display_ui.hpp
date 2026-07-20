@@ -69,6 +69,14 @@ namespace ui
 	/** The error view: a headline and a detail line, both required. */
 	void set_error(const char *title, const char *detail);
 
+	/** An "are you sure": a headline over the line that says which gesture does what. Every prompt
+	 * shares one view, so `hint` is where a screen states its own way out -- a prompt that does not
+	 * name the harmless gesture has one the user cannot see (the tap out of the bootloader screen
+	 * was invisible for exactly this reason).
+	 * @param title what is about to happen, in capitals
+	 * @param hint  both gestures, harmless one first ("Tap = cancel     Hold = ...") */
+	void set_confirm(const char *title, const char *hint);
+
 	/** The factory-reset confirmation. A reset drops every fabric and cannot be undone, so the
 	 * destructive answer is the deliberate gesture (hold), not the reflex (tap). */
 	void set_reset_prompt();

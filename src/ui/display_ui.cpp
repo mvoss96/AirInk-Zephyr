@@ -233,7 +233,7 @@ namespace
 	lv_obj_t *sensor_root, *co2_value, *hum_value, *temp_value, *temp_unit_lbl;
 	lv_obj_t *error_root, *err_title_lbl, *err_detail_lbl;
 	lv_obj_t *lowbat_root, *lowbat_fill, *lowbat_pct_lbl;
-	lv_obj_t *reset_root;
+	lv_obj_t *confirm_root, *confirm_title_lbl, *confirm_hint_lbl; // one view, every "are you sure"
 	/* THE menu. One set of widgets, and it draws whatever list it is handed -- it does not know that a
 	 * root and a Calibrate sub-menu exist, because to a panel they are five strings and a cursor,
 	 * twice. */
@@ -266,7 +266,7 @@ namespace
 		VIEW_SENSOR,
 		VIEW_ERROR,
 		VIEW_LOWBAT,
-		VIEW_RESET,
+		VIEW_CONFIRM,
 		VIEW_MENU,
 		VIEW_VALUE,
 		VIEW_PAIRING,
@@ -449,7 +449,7 @@ namespace
 		/* VIEW_SENSOR         */ {&sensor_root, false}, // resting: the whole point of the device
 		/* VIEW_ERROR          */ {&error_root, false},	// resting: up until the fault clears
 		/* VIEW_LOWBAT         */ {&lowbat_root, false}, // resting: up until the battery is not
-		/* VIEW_RESET          */ {&reset_root, true},	// a prompt, one button away from gone
+		/* VIEW_CONFIRM          */ {&confirm_root, true},	// a prompt, one button away from gone
 		/* VIEW_MENU           */ {&list_root, true},	// stepped through -- every menu, root or not
 		/* VIEW_VALUE          */ {&value_root, true},	// stepped through, one tap per step
 		/* VIEW_PAIRING        */ {&pair_root, true},	// read and dismissed
@@ -741,19 +741,19 @@ namespace
 		lv_obj_align(hint, LV_ALIGN_CENTER, 0, 72);
 	}
 
-	/** Build the factory-reset view: a large countdown and a hint. */
-	void build_reset(lv_obj_t *scr)
+	/** Build the confirm view: a headline and the line that says which gesture does what. One view
+	 * serves every "are you sure": the text is staged per prompt, and a second copy of this tree
+	 * would be LVGL pool spent on two labels that are never on screen together. */
+	void build_confirm(lv_obj_t *scr)
 	{
-		reset_root = make_view(scr);
+		confirm_root = make_view(scr);
 
-		lv_obj_t *title = make_label(reset_root, &b612_28, CONTENT_W);
-		lv_label_set_text(title, "FACTORY RESET");
-		lv_obj_align(title, LV_ALIGN_CENTER, 0, -10);
+		confirm_title_lbl = make_label(confirm_root, &b612_28, CONTENT_W);
+		lv_obj_align(confirm_title_lbl, LV_ALIGN_CENTER, 0, -10);
 
 		// Tap is the reflex, so tap is the harmless one. Same rule as the calibration prompt.
-		lv_obj_t *hint = make_label(reset_root, &b612_16, CONTENT_W);
-		lv_label_set_text(hint, "Tap = cancel     Hold = reset");
-		lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -10);
+		confirm_hint_lbl = make_label(confirm_root, &b612_16, CONTENT_W);
+		lv_obj_align(confirm_hint_lbl, LV_ALIGN_BOTTOM_MID, 0, -10);
 	}
 
 	/** Build the menu: LIST_MAX_ROWS labels (always all of them -- cheaper than rebuilding the tree
@@ -932,7 +932,7 @@ int ui::init(const Config &cfg)
 	h = log_built("error", h);
 	build_lowbat(scr);
 	h = log_built("lowbat", h);
-	build_reset(scr);
+	build_confirm(scr);
 	h = log_built("reset", h);
 	build_list(scr);
 	h = log_built("menu", h);
@@ -1100,14 +1100,21 @@ void ui::set_low_battery()
 	dirty = true;
 }
 
-void ui::set_reset_prompt()
+void ui::set_confirm(const char *title, const char *hint)
 {
 	if (!ready)
 	{
 		return;
 	}
-	pending_view = VIEW_RESET;
+	pending_view = VIEW_CONFIRM;
+	lv_label_set_text(confirm_title_lbl, title);
+	lv_label_set_text(confirm_hint_lbl, hint);
 	dirty = true;
+}
+
+void ui::set_reset_prompt()
+{
+	set_confirm("FACTORY RESET", "Tap = cancel     Hold = reset");
 }
 
 void ui::set_battery(uint8_t pct, bool charging)

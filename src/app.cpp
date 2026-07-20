@@ -145,9 +145,11 @@ static void app_loop(bool menu_active)
 				}
 				else if (status == menu::Status::FirmwareUpdate)
 				{
-					// Painted BEFORE the reset: e-paper holds it unpowered, so the hint stands
-					// for as long as the UF2 drive is open -- a bootloader screen for free.
-					ui::set_error("FIRMWARE UPDATE", "COPY UF2 TO NICENANO");
+					/* Painted BEFORE the reset: e-paper holds it unpowered, so this stands for as
+					 * long as the UF2 drive is open -- a bootloader screen for free. It names the
+					 * way out because from here there is no other: the bootloader is not our code,
+					 * it waits for a file forever, and unplugging does not send it home. */
+					ui::set_error("BOOTLOADER", "COPY UF2, OR PRESS RESET");
 					ui::refresh();
 					printk("[UI] rebooting into the UF2 bootloader\n");
 					NRF_POWER->GPREGRET = 0x57; // DFU_MAGIC_UF2_RESET; survives the soft reset

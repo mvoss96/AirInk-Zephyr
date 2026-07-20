@@ -149,10 +149,11 @@ namespace
 		{Kind::Leave, "Back"},
 	};
 
-	/* The update row exists only while USB is plugged: the UF2 drive it reboots into needs the
-	 * cable anyway, and without one the device would sit in the bootloader until a manual reset. */
+	/* "Bootloader", not "Firmware update": the row does not update anything, it hands the device to
+	 * the bootloader and the copying is the user's to do. It exists only while USB is plugged -- the
+	 * drive needs the cable anyway, and without one the device sits there until a manual reset. */
 	const Row SYSTEM[] = {
-		{Kind::Screen, "Firmware update", (uint8_t)Screen::FwUpdate, battery::charging},
+		{Kind::Screen, "Bootloader", (uint8_t)Screen::FwUpdate, battery::charging},
 		{Kind::Screen, "Factory reset", (uint8_t)Screen::FactoryReset, net::can_factory_reset},
 		{Kind::Leave, "Back"},
 	};
@@ -360,12 +361,13 @@ namespace
 	}
 
 	/** Ask before rebooting into the UF2 bootloader. Same one-button grammar as the reset prompt:
-	 * tap is the reflex, so tap backs out. */
+	 * tap is the reflex, so tap backs out -- and the screen says so, which is the whole reason this
+	 * uses the confirm view rather than the two-line error one. */
 	void to_update_prompt()
 	{
 		go(State::UpdatePrompt);
 		idle_at = k_uptime_get() + MENU_IDLE_MS;
-		ui::set_error("FIRMWARE UPDATE", "HOLD TO START");
+		ui::set_confirm("BOOTLOADER", "Tap = cancel     Hold = enter");
 	}
 
 	void to_calib_prompt()

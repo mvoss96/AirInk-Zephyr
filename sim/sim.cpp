@@ -328,7 +328,7 @@ int main(int argc, char **argv)
 	gesture(button::Event::Long);
 	walk_list("sysmenu");
 
-	// Held on Firmware update: tap backs out, hold reboots into the UF2 bootloader.
+	// Held on Bootloader: tap backs out, hold reboots into the UF2 bootloader.
 	gesture(button::Event::Long);
 	snapshot("update_prompt");
 	const menu::Status confirmed = gesture(button::Event::Long);
@@ -339,7 +339,7 @@ int main(int argc, char **argv)
 	if (confirmed == menu::Status::FirmwareUpdate)
 	{
 		simhost::tick_ms += 100;
-		ui::set_error("FIRMWARE UPDATE", "COPY UF2 TO NICENANO");
+		ui::set_error("BOOTLOADER", "COPY UF2, OR PRESS RESET");
 		ui::refresh();
 		snapshot("update_bootloader");
 	}
