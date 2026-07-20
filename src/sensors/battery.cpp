@@ -4,6 +4,7 @@
 
 #include <errno.h>
 #include <zephyr/kernel.h>
+#include <zephyr/init.h>
 #include <zephyr/drivers/adc.h>
 
 #include <hal/nrf_power.h>
@@ -93,6 +94,32 @@ namespace
 	 * full-refresh black flash every 30 s); charging always releases it. */
 	constexpr uint8_t LOW_ENTER_PCT = 5;
 	constexpr uint8_t LOW_EXIT_PCT = 8;
+
+	/** Take VBUS watching away from whoever had it before us.
+	 *
+	 * The UF2 bootloader watches VBUS itself, and when the cable is pulled it hands control to the
+	 * app WITHOUT a chip reset -- so POWER arrives with USBDETECTED still enabled and its event
+	 * still latched. Zephyr unmasks interrupts many seconds before app::run() gets to
+	 * watch_supply() (CHIP init sits in between), the stale event fires into that window, and nrfx
+	 * asserts on its handler, which is still null: kernel panic, system halted, panel white for
+	 * good because no refresh can ever follow. Observed on hardware, 2026-07-20.
+	 *
+	 * Clearing the enables is what fixes it; clearing the events keeps a later enable from
+	 * inheriting them. Disabling assertions would NOT help -- nrfx would then call the null
+	 * pointer instead. */
+	int quiesce_usb_events()
+	{
+		nrf_power_int_disable(NRF_POWER, NRF_POWER_INT_USBDETECTED_MASK |
+										 NRF_POWER_INT_USBREMOVED_MASK |
+										 NRF_POWER_INT_USBPWRRDY_MASK);
+		nrf_power_event_clear(NRF_POWER, NRF_POWER_EVENT_USBDETECTED);
+		nrf_power_event_clear(NRF_POWER, NRF_POWER_EVENT_USBREMOVED);
+		nrf_power_event_clear(NRF_POWER, NRF_POWER_EVENT_USBPWRRDY);
+		return 0;
+	}
+
+	/* Before the kernel, because "before any interrupt can be taken" is the whole point. */
+	SYS_INIT(quiesce_usb_events, PRE_KERNEL_1, 0);
 
 } // namespace
 
