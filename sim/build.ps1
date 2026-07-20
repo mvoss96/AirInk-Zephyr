@@ -65,8 +65,15 @@ $def = @("-DLV_CONF_INCLUDE_SIMPLE", "-include", $verHeader)
 $warn = @("-w")   # LVGL is noisy; we only care about our own code compiling
 
 Write-Host "==> Compiling C++ (UI + sim harness)" -ForegroundColor Cyan
+# menu/prefs/net are the firmware's own, compiled as they are: the mockups are then drawn by the
+# tables that ship, not by a copy of them in sim.cpp (which had already drifted -- a root menu row
+# that no longer existed). What they stand on comes from app_stubs.cpp + sim/zephyr/.
 $cppSrc = @(
     (Join-Path $src "ui/display_ui.cpp"),
+    (Join-Path $src "menu.cpp"),
+    (Join-Path $src "prefs.cpp"),
+    (Join-Path $src "net.cpp"),
+    (Join-Path $sim "app_stubs.cpp"),
     (Join-Path $sim "ui_platform_sim.cpp"),
     (Join-Path $sim "sim.cpp")
 )
